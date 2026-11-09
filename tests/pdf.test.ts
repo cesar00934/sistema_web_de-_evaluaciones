@@ -257,3 +257,105 @@ test("Mixed subtitle blocks preserve the original Flutter column order", async (
   );
   assert.equal((await PDFDocument.load(bytes)).getPageCount(), 1);
 });
+import { planQuestionPage } from "../src/lib/institutional-pdf";
+import { PDFPage } from "pdf-lib";
+
+test("Page prefixes preserve consecutive question numbers before splitting columns", () => {
+  assert.equal(planQuestionPage([100, 180, 170], 2, 210).count, 2);
+  assert.equal(planQuestionPage([100, 180, 170], 2, 370).count, 3);
+  assert.equal(planQuestionPage([100, 180, 170], 1, 210).count, 1);
+  assert.equal(planQuestionPage([900, 20], 2, 600).count, 0);
+  assert.equal(planQuestionPage([20, 900, 20], 2, 600).count, 1);
+});
+
+test("Actual PDF pages read in question order across columns, headings and oversized questions", async () => {
+  const qs = Array.from({ length: 18 }, (_, i) =>
+    questionSchema.parse({
+      ...questions[i % 4],
+      id: `ordered-${i}`,
+      prompt: `ORDEN${String(i + 1).padStart(2, "0")} ${i === 10 ? "Contenido largo para continuar en varias hojas. ".repeat(220) + " FINORDEN11" : "Resuelve la pregunta."}`,
+      subtitle:
+        i === 0
+          ? "Bloque inicial"
+          : i === 1
+            ? "Matematica"
+            : i === 12
+              ? "Bloque final"
+              : "",
+      imagePath: i % 3 === 0 ? "diagram" : null,
+    }),
+  );
+  const draw = PDFPage.prototype.drawText;
+  for (const columns of [1, 2]) {
+    for (const mode of ["original", "keys", "qr"] as const) {
+      let continuationPageIndex = -1;
+      const drawnPages: PDFPage[] = [];
+      const labels: { page: PDFPage; number: number; x: number; y: number }[] =
+        [];
+      PDFPage.prototype.drawText = function (value, options) {
+        if (!drawnPages.includes(this)) drawnPages.push(this);
+        if (value.includes("FINORDEN11"))
+          continuationPageIndex = drawnPages.indexOf(this);
+        const match = /^(\d+)\. ORDEN\d+/.exec(value);
+        if (match)
+          labels.push({
+            page: this,
+            number: Number(match[1]),
+            x: options?.x ?? 0,
+            y: options?.y ?? 0,
+          });
+        return draw.call(this, value, options);
+      };
+      let bytes: Uint8Array;
+      try {
+        bytes = await generatePdf(
+          {
+            ...exam,
+            settings: {
+              ...exam.settings,
+              columns,
+              instructions: "",
+              institutional: {
+                ...institutionalDefaults,
+                headerFirst: "builtin:1.jpg",
+                headerFollowing: "builtin:4.png",
+              },
+            },
+          },
+          { ...version, questions: qs },
+          "COLEGIO CRAMER",
+          mode,
+          async (asset) =>
+            new Uint8Array(
+              await readFile(
+                builtInAssets.find((a) => a.id === asset)
+                  ? `public${builtInAssets.find((a) => a.id === asset)!.url}`
+                  : "public/icon-192.png",
+              ),
+            ),
+        );
+      } finally {
+        PDFPage.prototype.drawText = draw;
+      }
+      const pageOrder = [...new Set(labels.map((l) => l.page))];
+      labels.sort(
+        (a, b) =>
+          pageOrder.indexOf(a.page) - pageOrder.indexOf(b.page) ||
+          a.x - b.x ||
+          b.y - a.y,
+      );
+      assert.deepEqual(
+        labels.map((l) => l.number),
+        Array.from({ length: 18 }, (_, i) => i + 1),
+        `${columns} columns, ${mode}`,
+      );
+      // The continuation must finish before question 12 starts, even when the
+      // tall question itself spans several pages with a different header.
+      assert.ok(continuationPageIndex >= 0);
+      const twelfth = labels.find((l) => l.number === 12)!;
+      assert.ok(continuationPageIndex <= drawnPages.indexOf(twelfth.page));
+      assert.ok((await PDFDocument.load(bytes)).getPageCount() > 2);
+      await writeFile(`artifacts/pdf/ordered-${columns}-${mode}.pdf`, bytes);
+    }
+  }
+});

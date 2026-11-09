@@ -84,3 +84,5 @@ npm run test:worker
 `test:db` usa PostgreSQL mediante PGlite con contratos locales de Auth/Storage; **no es un Supabase alojado**. `test:ui` sin credenciales comprueba login, diseño adaptable y redirecciones; no simula un usuario autenticado. Lee [la verificación y sus límites](docs/VERIFICATION.md), [migración](docs/MIGRATION.md), [arquitectura](docs/ARCHITECTURE.md) y [costos](docs/COSTS.md).
 
 Dependencias y compatibilidad: [revision de seguridad](docs/DEPENDENCY_SECURITY.md).
+
+El PDF institucional conserva los bloques y filas de dos columnas de Flutter. Cuando un bloque ocupa varias hojas, primero se asigna a cada hoja una secuencia consecutiva y despues se divide en columnas (izquierda de arriba abajo, seguida de derecha). Una pregunta extensa continua antes de empezar la siguiente; los subtitulos se mantienen con la primera pregunta cuando cabe completa.

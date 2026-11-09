@@ -674,34 +674,72 @@ export async function renderInstitutionalQuestions(
       if (offset < height) await newPage();
     }
   }
+  const contentBottom =
+    G.height - 5 - 8 - 12 - regular.heightAtSize(8) - 10 - 8;
   for (const group of groups) {
-    if (group.subtitle) {
-      const ls = wrapText(group.subtitle, bold, 11, innerWidth - 16);
-      await writeRow(
-        ls.map((l, i) => ({
-          kind: "text",
-          x: 8,
-          top: 16 + i * bold.heightAtSize(11),
-          height: bold.heightAtSize(11),
-          text: l,
-          font: bold,
-          size: 11,
-        })),
-        27 + ls.length * bold.heightAtSize(11),
-      );
+    const ls = group.subtitle
+      ? wrapText(group.subtitle, bold, 11, innerWidth - 16)
+      : [];
+    const titleHeight = ls.length ? 27 + ls.length * bold.heightAtSize(11) : 0;
+    // Measure once, then paginate consecutive prefixes before splitting columns.
+    // Splitting the entire block first can put question 4 on a page before 3.
+    const measured: { ops: Op[]; height: number }[] = [];
+    for (const { q, index } of group.questions) {
+      measured.push(await questionOps(q, index, 0));
     }
-    const half =
-      columns === 2
-        ? Math.ceil(group.questions.length / 2)
-        : group.questions.length;
-    for (let i = 0; i < half; i++) {
-      const left = group.questions[i],
-        right = columns === 2 ? group.questions[i + half] : undefined,
-        a = await questionOps(left.q, left.index, 0),
-        b = right
-          ? await questionOps(right.q, right.index, cellWidth + 10)
-          : { ops: [], height: 0 };
-      await writeRow([...a.ops, ...b.ops], Math.max(a.height, b.height) + 10);
+    let start = 0;
+    let titlePending = titleHeight > 0;
+    while (start < measured.length) {
+      const heading = titlePending ? titleHeight : 0;
+      const remaining = measured.slice(start);
+      const plan = planQuestionPage(
+        remaining.map((item) => item.height),
+        columns,
+        contentBottom - cursor - heading,
+      );
+      if (!plan.count && cursor > bodyTop + 8) {
+        await newPage();
+        continue;
+      }
+      if (titlePending) {
+        await writeRow(
+          ls.map((l, i) => ({
+            kind: "text",
+            x: 8,
+            top: 16 + i * bold.heightAtSize(11),
+            height: bold.heightAtSize(11),
+            text: l,
+            font: bold,
+            size: 11,
+          })),
+          titleHeight,
+        );
+        titlePending = false;
+      }
+      if (!plan.count) {
+        // A question taller than a whole page continues alone. Never place a
+        // later question beside its first fragment, ahead of its continuation.
+        await writeRow(remaining[0].ops, remaining[0].height + 10);
+        start++;
+        continue;
+      }
+      const half = columns === 2 ? Math.ceil(plan.count / 2) : plan.count;
+      for (let i = 0; i < half; i++) {
+        const left = remaining[i];
+        const right =
+          columns === 2 && i + half < plan.count
+            ? remaining[i + half]
+            : undefined;
+        const rightOps = right
+          ? right.ops.map((op) => ({ ...op, x: op.x + cellWidth + 10 }))
+          : [];
+        await writeRow(
+          [...left.ops, ...rightOps],
+          Math.max(left.height, right?.height ?? 0) + 10,
+        );
+      }
+      start += plan.count;
+      if (start < measured.length) await newPage();
     }
   }
   finishFrame();
@@ -772,4 +810,23 @@ export function drawInstitutionalFooters(
       color: gray,
     });
   }
+}
+
+/** Largest consecutive prefix that fits in Flutter-style paired column rows. */
+export function planQuestionPage(
+  heights: readonly number[],
+  columns: number,
+  available: number,
+) {
+  let count = 0;
+  for (let size = 1; size <= heights.length; size++) {
+    const half = columns === 2 ? Math.ceil(size / 2) : size;
+    let height = 0;
+    for (let i = 0; i < half; i++) {
+      const right = columns === 2 && i + half < size ? heights[i + half] : 0;
+      height += Math.max(heights[i], right) + 10;
+    }
+    if (height <= available) count = size;
+  }
+  return { count };
 }
