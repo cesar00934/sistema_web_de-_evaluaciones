@@ -1,0 +1,12 @@
+artifacts
+migration-output
+.npm-cache
+.pub-cache
+scripts/hive_export/.dart_tool
+.env.local
+.git
+node_modules
+coverage
+backups
+.env*
+!.env.example

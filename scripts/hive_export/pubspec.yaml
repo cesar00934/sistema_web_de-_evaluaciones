@@ -1,0 +1,6 @@
+name: cramer_hive_export
+description: Exportación aislada de una copia Hive; no modifica el proyecto Flutter.
+environment:
+  sdk: ">=3.9.0 <4.0.0"
+dependencies:
+  hive: 2.2.3
