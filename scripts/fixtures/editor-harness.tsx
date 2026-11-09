@@ -1,3 +1,4 @@
+import { parseStudentFile } from "../../src/lib/imports";
 // Local verification only. This entry is never included in the Next.js application.
 import { createRoot } from "react-dom/client";
 import { WorkspaceProvider } from "../../src/components/workspace-context";
@@ -5,6 +6,7 @@ import { CatalogProvider } from "../../src/components/catalog";
 import { ExamEditor } from "../../src/components/exam-editor";
 import { Scanner } from "../../src/components/scanner";
 import { browserClient } from "../../src/lib/supabase/client";
+Object.assign(window, { __parseStudentFile: parseStudentFile });
 const scanner = window.location.pathname === "/scanner";
 async function mount() {
   if (scanner) {

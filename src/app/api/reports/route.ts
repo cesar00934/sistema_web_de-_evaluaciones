@@ -88,14 +88,8 @@ export async function GET(request: NextRequest) {
       );
       type = "text/csv; charset=utf-8";
     } else if (format === "xlsx") {
-      const { Workbook } = await import("exceljs"),
-        book = new Workbook(),
-        sheet = book.addWorksheet("Resultados");
-      sheet.addRow(headers);
-      values.forEach((v) => sheet.addRow(v));
-      sheet.getRow(1).font = { bold: true };
-      sheet.columns.forEach((c) => (c.width = 24));
-      bytes = Buffer.from(await book.xlsx.writeBuffer());
+      const { reportSpreadsheet } = await import("@/lib/report-spreadsheet");
+      bytes = await reportSpreadsheet(headers, values);
       type =
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
     } else if (format === "pdf") {

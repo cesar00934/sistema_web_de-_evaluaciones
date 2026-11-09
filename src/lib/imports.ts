@@ -81,20 +81,7 @@ export async function parseStudentFile(file: File) {
   }
   if (!file.name.toLowerCase().endsWith(".xlsx"))
     throw Error("Usa CSV UTF-8 o XLSX");
-  const { Workbook } = await import("exceljs"),
-    book = new Workbook();
-  await book.xlsx.load(await file.arrayBuffer());
-  const sheet = book.worksheets[0];
-  if (!sheet) throw Error("Libro sin hojas");
-  const rows: unknown[][] = [];
-  sheet.eachRow((r) =>
-    rows.push(
-      (r.values as unknown[])
-        .slice(1)
-        .map((v) =>
-          typeof v === "object" && v && "text" in v ? String(v.text) : v,
-        ),
-    ),
-  );
+  const { readSheet } = await import("read-excel-file/universal");
+  const rows = await readSheet(await file.arrayBuffer());
   return studentPreview(rows);
 }

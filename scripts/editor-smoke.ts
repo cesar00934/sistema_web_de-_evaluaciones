@@ -1,3 +1,4 @@
+import { reportSpreadsheet } from "../src/lib/report-spreadsheet";
 import { chromium } from "@playwright/test";
 import { PGlite } from "@electric-sql/pglite";
 import { build } from "esbuild";
@@ -288,6 +289,25 @@ async function main() {
     });
     page.on("pageerror", (e) => errors.push(e.message));
     await page.goto(base);
+    const excelBytes = await reportSpreadsheet(
+      ["nombres", "apellidos", "nivel", "grado", "seccion", "codigo"],
+      [["Ana", "P\u00e9rez", "PRIMARIA", 3, "A", "0012"]],
+    );
+    const excelImport = await page.evaluate(async (bytes) => {
+      const file = new File([new Uint8Array(bytes)], "alumnos.xlsx");
+      return (
+        window as unknown as {
+          __parseStudentFile: (file: File) => Promise<{
+            students: { code: string; last_names: string }[];
+            errors: string[];
+          }>;
+        }
+      ).__parseStudentFile(file);
+    }, Array.from(excelBytes));
+    assert.deepEqual(excelImport.errors, []);
+    assert.equal(excelImport.students[0].code, "0012");
+    assert.equal(excelImport.students[0].last_names, "P\u00e9rez");
+
     await page
       .getByRole("button", { name: "+ Nueva evaluación", exact: true })
       .click();

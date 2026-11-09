@@ -3,7 +3,7 @@
 Este repositorio contiene la web directamente en su raiz: selecciona Root Directory `.`; no agregues otra carpeta `web-next`.
 
 1. En Vercel, importa `cesar00934/sistema_web_de-_evaluaciones` y selecciona la rama `main`.
-2. Framework: Next.js. Node.js: 24.x. Install Command: `npm ci`. Build Command: `npm run build`. Output Directory: valor automatico de Next.js. `vercel.json` ya configura framework, instalacion y build.
+2. Framework: Next.js. Node.js: 24.x. Install Command: `node scripts/npm-run.mjs ci`. Build Command: `node scripts/npm-run.mjs run build`. Output Directory: valor automatico de Next.js. `vercel.json` ya configura framework, instalacion y build.
 3. Antes de desplegar, configura estas variables en Vercel:
 
 | Variable | Valor |
@@ -29,3 +29,7 @@ Las fuentes y cabeceras se incluyen explicitamente en las funciones PDF mediante
 Referencias oficiales: https://vercel.com/docs/functions/runtimes/node-js/node-js-versions y https://vercel.com/kb/guide/how-can-i-use-files-in-serverless-functions .
 
 Esta preparacion no crea un proyecto en Vercel ni despliega automaticamente por si sola. Vercel debe tener acceso al repositorio y las variables deben configurarse en su proyecto. Si conectas el repositorio a Vercel, los siguientes pushes a main pueden activar despliegues automaticos.
+
+Si hay comandos personalizados en Vercel, usa los anteriores o elimina sus overrides para respetar vercel.json. El wrapper convierte npm_config_cache_dir a npm_config_cache; no oculta avisos.
+
+NEXT_PUBLIC_SITE_URL debe ser Config. Si ya se guardo como Secret y Config aparece bloqueado, elimina solamente esa variable y recreala seleccionando Config antes de guardar. Las claves secretas de Supabase siguen como Secret. Reconstruye el despliegue despues.

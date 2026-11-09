@@ -1,6 +1,6 @@
 # CRAMER EVAL · Web
 
-Aplicación Next.js 16.4.5, React, TypeScript y Supabase. Toda la implementación está en esta carpeta; el código Flutter se conserva. No usa datos simulados en la aplicación. Sin configurar Supabase, muestra instrucciones de configuración y bloquea el sistema.
+Aplicación Next.js 16.4.6, React, TypeScript y Supabase. Toda la implementación está en esta carpeta; el código Flutter se conserva. No usa datos simulados en la aplicación. Sin configurar Supabase, muestra instrucciones de configuración y bloquea el sistema.
 
 ## Puesta en marcha
 
@@ -58,7 +58,7 @@ Mantén abierta la pantalla del escáner hasta que termine el lote. Si falla Sto
 No se publicó el proyecto ni se contrató ningún servicio.
 
 1. Revisa primero la elegibilidad del plan, abajo. Sube el código a un repositorio privado de GitHub, excluyendo `.env.local`, `artifacts`, `migration-output`, cachés y datos académicos. Los archivos subidos por usuarios van a Storage.
-2. Importa el repositorio en Vercel y elige **Root Directory: `.` (raiz del repositorio)**, framework Next.js. Instalación `npm ci`, build `npm run build`, Node.js 24.x.
+2. Importa el repositorio en Vercel y elige **Root Directory: `.` (raiz del repositorio)**, framework Next.js. Instalación `node scripts/npm-run.mjs ci`, build `node scripts/npm-run.mjs run build`, Node.js 24.x.
 3. Configura las tres variables de `.env.example` para el entorno correspondiente. Las variables `NEXT_PUBLIC_*` se fijan durante el build: reconstruye si cambian. Usa un Supabase de prueba para Preview, separado de producción.
 4. Aplica las migraciones al proyecto correcto, crea usuarios y configura URLs/plantillas de correo. Comprueba RLS con dos cuentas antes de cargar datos reales.
 5. Solo después de tu autorización realiza el despliegue. Prueba cámara en HTTPS, login, recuperación y PDFs desde celular y PC.
@@ -82,3 +82,5 @@ npm run test:worker
 ```
 
 `test:db` usa PostgreSQL mediante PGlite con contratos locales de Auth/Storage; **no es un Supabase alojado**. `test:ui` sin credenciales comprueba login, diseño adaptable y redirecciones; no simula un usuario autenticado. Lee [la verificación y sus límites](docs/VERIFICATION.md), [migración](docs/MIGRATION.md), [arquitectura](docs/ARCHITECTURE.md) y [costos](docs/COSTS.md).
+
+Dependencias y compatibilidad: [revision de seguridad](docs/DEPENDENCY_SECURITY.md).
