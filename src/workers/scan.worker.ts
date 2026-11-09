@@ -1,5 +1,5 @@
-import jsQR from "jsqr";
-import { parseIdentity, type SheetPage } from "../lib/domain";
+import { readSheetIdentity } from "../lib/sheet-identity";
+import { type SheetPage } from "../lib/domain";
 import { processOmr } from "../lib/omr";
 const ctx = self as unknown as {
   onmessage: (e: MessageEvent) => void;
@@ -46,10 +46,7 @@ ctx.onmessage = async (e) => {
     } else c.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
     bitmap.close();
     const raster = c.getImageData(0, 0, canvas.width, canvas.height),
-      qr = jsQR(raster.data, raster.width, raster.height, {
-        inversionAttempts: "attemptBoth",
-      }),
-      identity = qr ? parseIdentity(qr.data) : null;
+      identity = readSheetIdentity(raster);
     if (
       identity &&
       (identity.examId !== examId || identity.versionId !== versionId)

@@ -3,10 +3,11 @@ import { useEffect, useRef, useState } from "react";
 import { Camera, Upload, ScanLine } from "lucide-react";
 import { Heading, useRows, requireUser, errorText } from "./common";
 import { browserClient } from "@/lib/supabase/client";
-import { type Version, type Answer } from "@/lib/domain";
+import { sheetLayout, type Version, type Answer } from "@/lib/domain";
 import { uploadScan } from "@/lib/uploads";
 import { recognize } from "@/lib/worker-client";
 import { useWorkspace } from "./workspace-context";
+import type { SheetIdentity } from "@/lib/sheet-identity";
 interface Job {
   id: string;
   name: string;
@@ -25,6 +26,9 @@ interface PendingImage {
   id: string;
   file: File;
   url: string;
+  identity?: SheetIdentity | null;
+  detectedVersion?: Version;
+  detectionError?: string;
 }
 export function Scanner() {
   const { id: ownerId } = useWorkspace();
@@ -140,7 +144,35 @@ export function Scanner() {
             URL.revokeObjectURL(url);
             return;
           }
-          const item = { id: crypto.randomUUID(), file, url };
+          const item: PendingImage = { id: crypto.randomUUID(), file, url };
+          try {
+            const { identifySheet } = await import("@/lib/sheet-identity");
+            item.identity = identifySheet(img);
+            if (item.identity) {
+              const { data, error } = await browserClient()
+                .from("versions")
+                .select("id,exam_id,label,questions,items,page_count")
+                .eq("owner_id", ownerId)
+                .eq("id", item.identity.versionId)
+                .eq("exam_id", item.identity.examId)
+                .single();
+              if (error || !data)
+                throw Error(
+                  "El QR identifica una versión que no está disponible en tu cuenta. Comprueba el examen y vuelve a cargar la hoja.",
+                );
+              if (item.identity.pageNumber > sheetLayout(data.questions).length)
+                throw Error(
+                  "El QR indica una página que no pertenece a esta versión.",
+                );
+              item.detectedVersion = data;
+            }
+          } catch (e) {
+            item.detectionError = errorText(e);
+          }
+          if (!mounted.current) {
+            URL.revokeObjectURL(url);
+            return;
+          }
           replacePending([...pendingRef.current, item]);
           setSelectedImage(item.id);
         } catch (e) {
@@ -156,6 +188,13 @@ export function Scanner() {
   }
   const previewImage =
     pending.find((p) => p.id === selectedImage) ?? pending[0];
+  const manualNeeded = pending.some((p) => !p.identity && !p.detectionError);
+  const assignmentReady =
+    pending.length > 0 &&
+    pending.every(
+      (p) =>
+        !p.detectionError && (p.detectedVersion || (!p.identity && version)),
+    );
   useEffect(() => {
     if (!pending.length) return;
     const warn = (e: BeforeUnloadEvent) => e.preventDefault();
@@ -295,9 +334,9 @@ export function Scanner() {
     });
   }
   async function process() {
-    if (!version || !student) {
+    if (!assignmentReady || !student) {
       setMessage(
-        "Las imágenes están listas. Selecciona la versión y el alumno para escanear y guardar.",
+        "Confirma al alumno y revisa las imágenes sin versión detectada antes de escanear y guardar.",
       );
       return;
     }
@@ -329,7 +368,14 @@ export function Scanner() {
         )
           throw Error("Usa JPG, PNG o WebP de hasta 20 MB");
         update(job.id, { state: "Reconociendo imagen original…" });
-        const result = await recognize(file, version, page);
+        const assignedVersion = batch[i].detectedVersion ?? version;
+        if (!assignedVersion || batch[i].detectionError)
+          throw Error("Revisa la versión de esta imagen antes de procesarla.");
+        const result = await recognize(
+          file,
+          assignedVersion,
+          batch[i].identity?.pageNumber ?? page,
+        );
         if (!result.ok) throw Error(result.error);
         let transcript = "";
         if (ocr) {
@@ -344,7 +390,7 @@ export function Scanner() {
         }
         const scan = {
           id: job.id,
-          version_id: version.id,
+          version_id: assignedVersion.id,
           student_id: student,
           page_number: result.page,
           image_hash: result.hash,
@@ -391,7 +437,7 @@ export function Scanner() {
       <Heading
         eyebrow="CAPTURA Y RECONOCIMIENTO"
         title="Una hoja. Todas las respuestas."
-        description="Carga las imágenes, confirma alumno y versión y pulsa Escanear y guardar."
+        description="Carga las imágenes: el QR detecta la versión y la página. Confirma al alumno y pulsa Escanear y guardar."
       />
       <div className="scanner-grid">
         <section className="card capture">
@@ -451,7 +497,11 @@ export function Scanner() {
               />
             </label>
           </div>
-          {preparing && <p role="status">Preparando vistas previas…</p>}
+          {preparing && (
+            <p role="status">
+              Preparando imágenes y detectando versión por QR…
+            </p>
+          )}
           {pending.length > 0 && (
             <section className="scan-pending" aria-label="Imágenes preparadas">
               <h3>Imágenes listas para escanear · {pending.length}</h3>
@@ -470,6 +520,12 @@ export function Scanner() {
                       <img src={p.url} alt={p.file.name} />
                       <span>{p.file.name}</span>
                     </button>
+                    <small className={p.detectionError ? "error" : "muted"}>
+                      {p.detectionError ??
+                        (p.detectedVersion
+                          ? `QR: ${p.detectedVersion.label} · Página ${p.identity!.pageNumber}`
+                          : "Sin QR legible: elige una versión manualmente.")}
+                    </small>
                     <button
                       className="text-button"
                       disabled={busy || preparing}
@@ -506,51 +562,69 @@ export function Scanner() {
           </small>
         </section>
         <section className="card">
-          <h2>2. Confirma alumno y versión</h2>
-          <label>
-            Buscar versión
-            <input
-              value={vQuery}
-              placeholder="ORIGINAL, A, B…"
-              onChange={(e) => setVQuery(e.target.value)}
-            />
-            <select
-              aria-label="Versión del examen"
-              value={version?.id ?? ""}
-              disabled={busy}
-              onChange={async (e) => {
-                const id = e.target.value;
-                requestedVersion.current = id;
-                setVersion(null);
-                if (!id) {
+          <h2>2. Confirma al alumno</h2>
+          {previewImage?.detectedVersion && (
+            <div className="notice" role="status">
+              <strong>
+                Versión detectada automáticamente:{" "}
+                {previewImage.detectedVersion.label}
+              </strong>
+              <br />
+              Página {previewImage.identity!.pageNumber} · Examen{" "}
+              {previewImage.detectedVersion.exam_id.slice(0, 8)}
+            </div>
+          )}
+          {previewImage?.detectionError && (
+            <p role="alert" className="error">
+              {previewImage.detectionError}
+            </p>
+          )}
+          {(!pending.length || manualNeeded) && (
+            <label>
+              Versión manual para imágenes sin QR
+              <input
+                value={vQuery}
+                placeholder="ORIGINAL, A, B…"
+                onChange={(e) => setVQuery(e.target.value)}
+              />
+              <select
+                aria-label="Versión del examen"
+                value={version?.id ?? ""}
+                disabled={busy}
+                onChange={async (e) => {
+                  const id = e.target.value;
+                  requestedVersion.current = id;
                   setVersion(null);
-                  return;
-                }
-                const { data, error } = await browserClient()
-                  .from("versions")
-                  .select("id,exam_id,label,questions,items,page_count")
-                  .eq("owner_id", ownerId)
-                  .eq("id", id)
-                  .single();
-                if (requestedVersion.current !== id) return;
-                if (error) setMessage(error.message);
-                else {
-                  setVersion(data);
-                  setPage(1);
-                }
-              }}
-            >
-              <option value="">Selecciona la versión</option>
-              {version && !versions.rows.some((v) => v.id === version.id) && (
-                <option value={version.id}>{version.label}</option>
-              )}
-              {versions.rows.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.label} · {v.exam_id.slice(0, 8)}
-                </option>
-              ))}
-            </select>
-          </label>
+                  if (!id) {
+                    setVersion(null);
+                    return;
+                  }
+                  const { data, error } = await browserClient()
+                    .from("versions")
+                    .select("id,exam_id,label,questions,items,page_count")
+                    .eq("owner_id", ownerId)
+                    .eq("id", id)
+                    .single();
+                  if (requestedVersion.current !== id) return;
+                  if (error) setMessage(error.message);
+                  else {
+                    setVersion(data);
+                    setPage(1);
+                  }
+                }}
+              >
+                <option value="">Selecciona la versión</option>
+                {version && !versions.rows.some((v) => v.id === version.id) && (
+                  <option value={version.id}>{version.label}</option>
+                )}
+                {versions.rows.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.label} · {v.exam_id.slice(0, 8)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <label>
             Buscar alumno por apellido
             <input
@@ -585,17 +659,19 @@ export function Scanner() {
               ))}
             </select>
           </label>
-          <label>
-            Página manual (el QR tiene prioridad)
-            <input
-              type="number"
-              min={1}
-              max={version?.page_count ?? 1}
-              value={page}
-              disabled={busy}
-              onChange={(e) => setPage(Number(e.target.value))}
-            />
-          </label>
+          {(!pending.length || manualNeeded) && (
+            <label>
+              Página manual para imágenes sin QR
+              <input
+                type="number"
+                min={1}
+                max={version?.page_count ?? 1}
+                value={page}
+                disabled={busy}
+                onChange={(e) => setPage(Number(e.target.value))}
+              />
+            </label>
+          )}
           <label className="check">
             <input
               type="checkbox"
@@ -641,14 +717,12 @@ export function Scanner() {
         <p className="muted">
           {!pending.length
             ? "Puedes cargar imágenes antes de elegir alumno y versión."
-            : !version || !student
-              ? "Tus imágenes están preparadas. Elige la versión y confirma al alumno para continuar."
+            : !assignmentReady || !student
+              ? "Confirma al alumno. Si alguna imagen no tiene QR legible, selecciona su versión manualmente; los errores de QR deben corregirse antes de continuar."
               : "Listo. Al pulsar el botón se reconocerán y guardarán las respuestas para el alumno seleccionado."}
         </p>
         <button
-          disabled={
-            busy || preparing || !pending.length || !version || !student
-          }
+          disabled={busy || preparing || !assignmentReady || !student}
           onClick={() => void process()}
         >
           <ScanLine size={18} />

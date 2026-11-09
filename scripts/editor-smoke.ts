@@ -1,3 +1,5 @@
+import QRCode from "qrcode";
+import sharp from "sharp";
 import { reportSpreadsheet } from "../src/lib/report-spreadsheet";
 import { chromium } from "@playwright/test";
 import { PGlite } from "@electric-sql/pglite";
@@ -711,8 +713,122 @@ async function main() {
       path: "artifacts/ui/scanner-mobile.png",
       fullPage: true,
     });
+    // Real QR pixels: no manual version selection, two versions in one batch.
+    await page.goto(`${base}/scanner`);
+    const qrFiles = [];
+    for (const [id, label] of [
+      ["auto-a", "Version automatica A"],
+      ["auto-b", "Version automatica B"],
+    ]) {
+      await db.query(
+        "insert into versions(id,exam_id,label,questions,items,page_count,scale_maximum) values($1,$2,$3,$4,$5,$6,20)",
+        [
+          id,
+          examRow.id,
+          label,
+          JSON.stringify(examRow.settings.localQuestions),
+          JSON.stringify(scanPages.flatMap((p) => [...p.items, ...p.written])),
+          scanPages.length,
+        ],
+      );
+      const qr = await QRCode.toBuffer(`CE1|${examRow.id}|${id}|1`, {
+        width: 240,
+        margin: 4,
+      });
+      let buffer = await sharp({
+        create: { width: 1000, height: 1400, channels: 4, background: "white" },
+      })
+        .composite([{ input: qr, left: 700, top: 70 }])
+        .png()
+        .toBuffer();
+      if (id === "auto-b")
+        buffer = await sharp(buffer).rotate(90).png().toBuffer();
+      qrFiles.push({ name: `${id}.png`, mimeType: "image/png", buffer });
+    }
+    await upload.setInputFiles(qrFiles);
+    await page
+      .getByText("QR: Version automatica A · Página 1", { exact: true })
+      .waitFor();
+    await page
+      .getByText("QR: Version automatica B · Página 1", { exact: true })
+      .waitFor();
+    assert.equal(
+      await page
+        .getByRole("combobox", { name: "Versión del examen", exact: true })
+        .count(),
+      0,
+    );
+    assert.equal(await scanButton.isDisabled(), true);
+    await page
+      .getByRole("combobox", { name: "Alumno para este lote", exact: true })
+      .selectOption("scanner-student");
+    await page.getByLabel("Guardar copia comprimida para revisión").uncheck();
+    await page.waitForFunction(
+      () =>
+        !document.querySelector<HTMLButtonElement>(".scan-submit button")
+          ?.disabled,
+    );
+    await upload.setInputFiles({
+      name: "qr-no-autorizado.png",
+      mimeType: "image/png",
+      buffer: await QRCode.toBuffer(`CE1|otro-examen|auto-a|1`, {
+        width: 400,
+        margin: 4,
+      }),
+    });
+    await page
+      .getByRole("alert")
+      .filter({ hasText: "no está disponible en tu cuenta" })
+      .waitFor();
+    assert.equal(await scanButton.isDisabled(), true);
+    await page
+      .getByRole("button", { name: "Quitar qr-no-autorizado.png", exact: true })
+      .click();
+    // A readable QR with an invalid page blocks the batch, rather than silently
+    // using an unrelated manual version or guessing from labels.
+    await upload.setInputFiles({
+      name: "pagina-invalida.png",
+      mimeType: "image/png",
+      buffer: await QRCode.toBuffer(`CE1|${examRow.id}|auto-a|999`, {
+        width: 400,
+        margin: 4,
+      }),
+    });
+    await page
+      .getByRole("alert")
+      .filter({ hasText: "El QR indica una página" })
+      .waitFor();
+    assert.equal(await scanButton.isDisabled(), true);
+    await page
+      .getByRole("button", { name: "Quitar pagina-invalida.png", exact: true })
+      .click();
+    await page.screenshot({
+      path: "artifacts/ui/scanner-auto-qr.png",
+      fullPage: true,
+    });
+    assert.equal(workerStarts, 1);
+    assert.equal(commits, 1);
+    await scanButton.click();
+    await page.waitForFunction(
+      () => document.querySelectorAll(".scan-thumbnails article").length === 0,
+    );
+    assert.equal(workerStarts, 3);
+    assert.equal(commits, 3);
+    const autoScans = (
+      await db.query<{ version_id: string; page_number: number }>(
+        "select version_id,page_number from scans where version_id in ('auto-a','auto-b') order by version_id",
+      )
+    ).rows;
+    assert.deepEqual(
+      autoScans.map((r) => [r.version_id, r.page_number]),
+      [
+        ["auto-a", 1],
+        ["auto-b", 1],
+      ],
+    );
     assert.deepEqual(errors, []);
     const checks = [
+      "QR real: versión/página automáticas, imagen girada, lote con dos versiones y página inválida bloqueada; ningún guardado antes del botón",
       "Pregunta interna guardada sin banco",
       "Imagen sin MIME: carga, miniatura, almacenamiento privado, recarga y PDF",
       "Claves F/V elegidas explícitamente, guardadas y recuperadas",

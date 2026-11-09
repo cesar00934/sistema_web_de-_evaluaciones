@@ -86,3 +86,5 @@ npm run test:worker
 Dependencias y compatibilidad: [revision de seguridad](docs/DEPENDENCY_SECURITY.md).
 
 El PDF institucional conserva los bloques y filas de dos columnas de Flutter. Cuando un bloque ocupa varias hojas, primero se asigna a cada hoja una secuencia consecutiva y despues se divide en columnas (izquierda de arriba abajo, seguida de derecha). Una pregunta extensa continua antes de empezar la siguiente; los subtitulos se mantienen con la primera pregunta cuando cabe completa.
+
+El escaner lee el QR al preparar cada imagen y obtiene su version y pagina sin seleccionar una version manualmente. Cada QR se verifica contra las versiones accesibles de la cuenta y su examen. Se admiten varias versiones en el mismo lote para el alumno confirmado. Si no hay QR legible se muestra el selector manual; un QR de otra cuenta/examen o una pagina invalida bloquea el lote hasta quitar o corregir esa imagen. Esta preparacion no reconoce respuestas ni guarda notas: eso comienza al pulsar Escanear y guardar. Para deteccion automatica usa la hoja de respuestas o un PDF generado con QR.
