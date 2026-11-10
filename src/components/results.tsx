@@ -5,11 +5,18 @@ import { PrivateImage } from "./records";
 import { browserClient } from "@/lib/supabase/client";
 import {
   emptyFilters,
+  resultColumns,
   resultQuery,
   type Filters,
   type ResultRow,
 } from "@/lib/result-query";
 import type { Answer, Item, Version } from "@/lib/domain";
+import { AnswerReview } from "./answer-review";
+import {
+  readingLabels,
+  optionLabel,
+  parseWrittenTranscript,
+} from "@/lib/review-reading";
 import { recognize } from "@/lib/worker-client";
 import { useWorkspace } from "./workspace-context";
 interface ReviewScan {
@@ -30,7 +37,11 @@ interface ReviewScan {
 interface Review {
   version: Version;
   scans: ReviewScan[];
-  manual: { question_id: string; score: number; rubric: { text?: string } }[];
+  manual: {
+    question_id: string;
+    score: number;
+    rubric: { text?: string; transcription?: string; selected?: string };
+  }[];
   result: ResultRow;
 }
 interface Summary {
@@ -49,6 +60,13 @@ interface Summary {
   }[];
   distribution: { label: number; count: number }[] | null;
 }
+async function saveTranscript(scanId: string, text: string) {
+  const { error } = await browserClient().rpc("update_transcript", {
+    p_scan: scanId,
+    p_text: text,
+  });
+  if (error) throw error;
+}
 export function Results({ mode }: { mode: string }) {
   const { id: ownerId } = useWorkspace();
   const [filters, setFilters] = useState<Filters>({
@@ -63,6 +81,7 @@ export function Results({ mode }: { mode: string }) {
     [busy, setBusy] = useState(false),
     [summary, setSummary] = useState<Summary | null>(null),
     [review, setReview] = useState<Review | null>(null),
+    [openSheets, setOpenSheets] = useState<Record<string, boolean>>({}),
     [selected, setSelected] = useState<string[]>([]);
   const load = useCallback(async () => {
     try {
@@ -98,7 +117,7 @@ export function Results({ mode }: { mode: string }) {
   async function open(result: ResultRow) {
     try {
       const db = browserClient(),
-        [v, s, m] = await Promise.all([
+        [v, s, m, current] = await Promise.all([
           db
             .from("versions")
             .select("id,exam_id,label,questions,items,page_count")
@@ -113,16 +132,29 @@ export function Results({ mode }: { mode: string }) {
             .eq("version_id", result.version_id)
             .eq("owner_id", result.owner_id)
             .eq("student_id", result.student_id)
-            .order("created_at"),
+            .order("page_number")
+            .order("created_at")
+            .order("id"),
           db
             .from("manual_grades")
             .select("question_id,score,rubric")
             .eq("version_id", result.version_id)
             .eq("owner_id", result.owner_id)
             .eq("student_id", result.student_id),
+          db
+            .from("results")
+            .select(resultColumns)
+            .eq("id", result.id)
+            .eq("owner_id", result.owner_id)
+            .single(),
         ]);
-      for (const r of [v, s, m]) if (r.error) throw r.error;
-      setReview({ version: v.data!, scans: s.data!, manual: m.data!, result });
+      for (const r of [v, s, m, current]) if (r.error) throw r.error;
+      setReview({
+        version: v.data!,
+        scans: s.data!,
+        manual: m.data!,
+        result: current.data as unknown as ResultRow,
+      });
       setSelected([]);
     } catch (e) {
       setMessage(errorText(e));
@@ -130,7 +162,7 @@ export function Results({ mode }: { mode: string }) {
   }
   async function manual(e: React.FormEvent<HTMLFormElement>, item: Item) {
     e.preventDefault();
-    if (!review) return;
+    if (!review || busy) return;
     setBusy(true);
     const f = new FormData(e.currentTarget);
     try {
@@ -139,7 +171,11 @@ export function Results({ mode }: { mode: string }) {
         p_student: review.result.student_id,
         p_question: item.questionId,
         p_score: Number(f.get("score")),
-        p_rubric: { text: String(f.get("rubric") ?? "") },
+        p_rubric: {
+          text: String(f.get("rubric") ?? ""),
+          transcription: String(f.get("transcription") ?? ""),
+          selected: String(f.get("selected") ?? ""),
+        },
       });
       if (error) throw error;
       setMessage("Revisión guardada. Se conserva al reprocesar.");
@@ -361,21 +397,50 @@ export function Results({ mode }: { mode: string }) {
               <p>
                 {review.result.versions.exams.title} · {review.version.label}
               </p>
+              <p>
+                Nota {Number(review.result.grade).toFixed(2)} ·{" "}
+                {review.result.pending
+                  ? `${review.result.pending} ${review.result.pending === 1 ? "pendiente" : "pendientes"}`
+                  : "Confirmada"}
+              </p>
             </div>
-            <button className="secondary" onClick={() => setReview(null)}>
+            <button
+              className="secondary"
+              disabled={busy}
+              onClick={() => {
+                setReview(null);
+                setOpenSheets({});
+              }}
+            >
               Cerrar revisión
             </button>
           </div>
-          <h3>Evidencia y páginas</h3>
+          <h3>1. Hojas del alumno</h3>
+          <p>
+            Abre la imagen para compararla con las respuestas. Las lecturas
+            dudosas y las respuestas escritas necesitan revisión.
+          </p>
           <p className="muted">
             Elegir una página sustituye todas las otras capturas activas de esa
             misma página. Las revisiones docentes se conservan.
           </p>
           {review.scans.map((scan) => (
-            <details key={scan.id} className="scan-review">
+            <details
+              key={scan.id}
+              id={`evidencia-${scan.id}`}
+              className="scan-review"
+              onToggle={(e) => {
+                const isOpen = e.currentTarget.open;
+                setOpenSheets((sheets) => ({ ...sheets, [scan.id]: isOpen }));
+              }}
+            >
               <summary>
-                Página {scan.page_number} · {scan.status} ·{" "}
-                {new Date(scan.created_at).toLocaleString("es-PE")}
+                Página {scan.page_number} ·{" "}
+                {scan.status === "ambiguous"
+                  ? "Con pendientes"
+                  : (readingLabels[scan.status] ??
+                    "Pendiente de revisión")}{" "}
+                · {new Date(scan.created_at).toLocaleString("es-PE")}
               </summary>
               {scan.warning && <p className="notice">{scan.warning}</p>}
               {scan.attachments.length ? (
@@ -399,6 +464,7 @@ export function Results({ mode }: { mode: string }) {
                       bucket="scans"
                       path={a.path}
                       thumbnail={a.thumbnail_path}
+                      autoLoad={openSheets[scan.id]}
                     />
                   </div>
                 ))
@@ -408,29 +474,112 @@ export function Results({ mode }: { mode: string }) {
                   conservada.
                 </p>
               )}
-              <form
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  const text = String(
-                    new FormData(e.currentTarget).get("transcript") ?? "",
-                  );
-                  const { error } = await browserClient().rpc(
-                    "update_transcript",
-                    { p_scan: scan.id, p_text: text },
-                  );
-                  setMessage(error ? error.message : "Transcripción guardada.");
-                }}
-              >
-                <label>
-                  Transcripción editable
-                  <textarea
-                    name="transcript"
-                    rows={5}
-                    defaultValue={scan.transcript}
-                  />
-                </label>
-                <button className="secondary">Guardar transcripción</button>
-              </form>
+              {parseWrittenTranscript(scan.transcript).length > 0 ? (
+                <p className="muted">
+                  La transcripción de esta hoja se revisa por pregunta en
+                  «Respuestas y puntajes».
+                </p>
+              ) : (
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    if (busy) return;
+                    const text = String(
+                      new FormData(e.currentTarget).get("transcript") ?? "",
+                    );
+                    setBusy(true);
+                    try {
+                      await saveTranscript(scan.id, text);
+                      await open(review.result);
+                      setMessage("Transcripción guardada.");
+                    } catch (error) {
+                      setMessage(errorText(error));
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  <label>
+                    Transcripción general de la hoja
+                    <textarea
+                      key={scan.transcript}
+                      name="transcript"
+                      rows={5}
+                      defaultValue={scan.transcript}
+                    />
+                  </label>
+                  <button className="secondary" disabled={busy}>
+                    Guardar transcripción
+                  </button>
+                </form>
+              )}
+              {scan.status !== "replaced" &&
+                scan.attachments.length > 0 &&
+                review.version.items.some(
+                  (i) =>
+                    i.page === scan.page_number && i.type === "openResponse",
+                ) && (
+                  <button
+                    className="secondary"
+                    disabled={busy}
+                    onClick={async () => {
+                      setBusy(true);
+                      try {
+                        setMessage(
+                          "Preparando la lectura local del manuscrito…",
+                        );
+                        const { data, error } = await browserClient()
+                          .storage.from("scans")
+                          .download(scan.attachments[0].path);
+                        if (error) throw error;
+                        const detected = await recognize(
+                          new File([data], "respuesta.jpg", {
+                            type: "image/jpeg",
+                          }),
+                          review.version,
+                          scan.page_number,
+                          true,
+                        );
+                        if (!detected.ok) throw Error(detected.error);
+                        if (detected.page !== scan.page_number)
+                          throw Error(
+                            "El QR indica otra página. Revisa la asignación.",
+                          );
+                        if (!detected.written?.length)
+                          throw Error(
+                            detected.writtenWarning ||
+                              detected.warning ||
+                              "No se pudo ubicar el área de respuesta. Revisa los cuatro marcadores de la hoja.",
+                          );
+                        const { recognizeHandwriting } =
+                          await import("@/lib/handwriting-client");
+                        const answers = await recognizeHandwriting(
+                          detected.written,
+                          setMessage,
+                        );
+                        await saveTranscript(
+                          scan.id,
+                          JSON.stringify({
+                            format: "cramer-written-v1",
+                            answers,
+                          }),
+                        );
+                        await open(review.result);
+                        setMessage(
+                          "Texto propuesto listo para revisar. Los puntajes confirmados se conservan.",
+                        );
+                      } catch (error) {
+                        setMessage(errorText(error));
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                  >
+                    {scan.transcript
+                      ? "Volver a leer escritura (reemplaza transcripción)"
+                      : "Leer escritura a mano en este dispositivo"}
+                  </button>
+                )}
               {scan.attachments.length > 0 && (
                 <button
                   className="secondary"
@@ -482,6 +631,7 @@ export function Results({ mode }: { mode: string }) {
               {scan.answers.map((a) => (
                 <div className="metric-row" key={a.question_id}>
                   <span>
+                    Pregunta{" "}
                     {review.version.items.find(
                       (i) => i.questionId === a.question_id,
                     )?.label ?? a.question_id}
@@ -489,8 +639,13 @@ export function Results({ mode }: { mode: string }) {
                   <span>
                     {a.selected === null
                       ? "Sin selección"
-                      : String.fromCharCode(65 + a.selected)}{" "}
-                    · {a.status} · {Number(a.confidence).toFixed(2)}
+                      : optionLabel(
+                          review.version.items.find(
+                            (i) => i.questionId === a.question_id,
+                          ),
+                          a.selected,
+                        )}{" "}
+                    · {readingLabels[a.status] ?? "Revisar lectura"}
                   </span>
                 </div>
               ))}
@@ -498,6 +653,7 @@ export function Results({ mode }: { mode: string }) {
                 className="secondary"
                 disabled={busy}
                 onClick={async () => {
+                  setBusy(true);
                   try {
                     const { error } = await browserClient().rpc(
                       "resolve_scan",
@@ -508,6 +664,8 @@ export function Results({ mode }: { mode: string }) {
                     await load();
                   } catch (e) {
                     setMessage(errorText(e));
+                  } finally {
+                    setBusy(false);
                   }
                 }}
               >
@@ -515,65 +673,56 @@ export function Results({ mode }: { mode: string }) {
               </button>
             </details>
           ))}
-          <button
-            className="danger"
-            disabled={busy || !selected.length}
-            onClick={removeImages}
-          >
-            Eliminar {selected.length} imágenes seleccionadas
-          </button>
-          <h3>Revisión por pregunta</h3>
-          {review.version.items.map((item) => {
-            const existing = review.manual.find(
+          {selected.length > 0 && (
+            <button className="danger" disabled={busy} onClick={removeImages}>
+              {selected.length === 1
+                ? "Eliminar la imagen seleccionada"
+                : `Eliminar ${selected.length} imágenes seleccionadas`}
+            </button>
+          )}
+          <h3>2. Respuestas y puntajes</h3>
+          <p>
+            Compara la respuesta detectada con la correcta. Usa «Rectificar»
+            para cambiar una lectura o asignar un puntaje parcial.
+          </p>
+          {[...review.version.items]
+            .sort((a, b) =>
+              a.label.localeCompare(b.label, "es", { numeric: true }),
+            )
+            .map((item) => {
+              const existing = review.manual.find(
                 (m) => m.question_id === item.questionId,
-              ),
-              q = review.version.questions.find(
+              );
+              const question = review.version.questions.find(
                 (q) => q.id === item.questionId.split("#")[0],
               );
-            return (
-              <form
-                className="manual-grade"
-                key={`${item.questionId}-${existing?.score ?? "new"}`}
-                onSubmit={(e) => manual(e, item)}
-              >
-                <div>
-                  <strong>
-                    {item.label}. {q?.prompt}
-                  </strong>
-                  <p className="muted">
-                    Máximo: {item.score} · Clave:{" "}
-                    {item.correctOptionIndex === null
-                      ? "Revisión docente"
-                      : item.type === "trueFalse"
-                        ? item.correctOptionIndex === 0
-                          ? "V"
-                          : "F"
-                        : String.fromCharCode(65 + item.correctOptionIndex)}
-                  </p>
-                  {q?.referenceAnswer && <p>Referencia: {q.referenceAnswer}</p>}
-                </div>
-                <div className="form-grid">
-                  <label>
-                    Puntaje confirmado
-                    <input
-                      name="score"
-                      type="number"
-                      min={0}
-                      max={item.score}
-                      step="any"
-                      required
-                      defaultValue={existing?.score}
-                    />
-                  </label>
-                  <label>
-                    Rúbrica / observación
-                    <input name="rubric" defaultValue={existing?.rubric.text} />
-                  </label>
-                </div>
-                <button disabled={busy}>Confirmar puntaje</button>
-              </form>
-            );
-          })}
+              const captures = review.scans.filter(
+                (s) => s.status !== "replaced" && s.page_number === item.page,
+              );
+              const capture = captures.length === 1 ? captures[0] : undefined;
+              const transcript =
+                capture &&
+                parseWrittenTranscript(capture.transcript).find(
+                  (t) => t.questionId === item.questionId,
+                );
+              return (
+                <AnswerReview
+                  key={`${review.result.id}-${item.questionId}-${review.result.updated_at}-${capture?.id}-${transcript?.text ?? ""}`}
+                  item={item}
+                  question={question}
+                  scans={review.scans}
+                  existing={existing}
+                  transcript={transcript}
+                  evidenceId={
+                    capture?.attachments.length
+                      ? `evidencia-${capture.id}`
+                      : undefined
+                  }
+                  busy={busy}
+                  onSave={manual}
+                />
+              );
+            })}
         </section>
       )}
       <section className="card">
@@ -638,7 +787,19 @@ export function Results({ mode }: { mode: string }) {
                       </span>
                     </td>
                     <td>
-                      <button className="secondary" onClick={() => open(r)}>
+                      <button
+                        className="secondary"
+                        disabled={busy}
+                        onClick={async () => {
+                          setOpenSheets({});
+                          setBusy(true);
+                          try {
+                            await open(r);
+                          } finally {
+                            setBusy(false);
+                          }
+                        }}
+                      >
                         Revisar
                       </button>
                     </td>

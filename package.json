@@ -19,6 +19,7 @@
     "format:check": "prettier --check src scripts tests next.config.ts"
   },
   "dependencies": {
+    "@huggingface/transformers": "4.3.2",
     "@pdf-lib/fontkit": "1.1.1",
     "@supabase/ssr": "0.12.7",
     "@supabase/supabase-js": "2.119.0",
@@ -30,14 +31,16 @@
     "qrcode": "1.5.4",
     "react": "19.3.1",
     "react-dom": "19.3.1",
+    "read-excel-file": "9.3.14",
     "sharp": "0.35.5",
     "tesseract.js": "7.0.0",
-    "zod": "4.6.7",
-    "read-excel-file": "9.3.14",
-    "write-excel-file": "4.1.1"
+    "write-excel-file": "4.1.1",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.16",
+    "@eslint-react/eslint-plugin": "5.28.8",
+    "@next/eslint-plugin-next": "16.4.6",
     "@playwright/test": "1.65.0",
     "@types/node": "26.6.6",
     "@types/papaparse": "5.5.2",
@@ -46,12 +49,10 @@
     "@types/react-dom": "19.3.0",
     "esbuild": "0.28.2",
     "eslint": "10.14.0",
+    "eslint-plugin-react-hooks": "7.1.1",
     "prettier": "3.9.10",
     "typescript": "6.0.3",
-    "@next/eslint-plugin-next": "16.4.6",
-    "typescript-eslint": "8.72.2",
-    "eslint-plugin-react-hooks": "7.1.1",
-    "@eslint-react/eslint-plugin": "5.28.8"
+    "typescript-eslint": "8.72.2"
   },
   "engines": {
     "node": "24.x"

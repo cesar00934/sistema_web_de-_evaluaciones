@@ -1,5 +1,7 @@
 import { type Version, type Answer, sheetLayout } from "./domain";
 export interface Recognition {
+  written?: import("./handwriting-client").WrittenCrop[];
+  writtenWarning?: string;
   ok: boolean;
   error?: string;
   hash: string;
@@ -9,7 +11,12 @@ export interface Recognition {
   stored: Blob;
   thumbnail: Blob;
 }
-export function recognize(file: File, version: Version, pageNumber: number) {
+export function recognize(
+  file: File,
+  version: Version,
+  pageNumber: number,
+  readWritten = false,
+) {
   return new Promise<Recognition>((resolve, reject) => {
     const worker = new Worker(
       new URL("../workers/scan.worker.ts", import.meta.url),
@@ -34,6 +41,7 @@ export function recognize(file: File, version: Version, pageNumber: number) {
       examId: version.exam_id,
       versionId: version.id,
       pageNumber,
+      readWritten,
     });
   });
 }

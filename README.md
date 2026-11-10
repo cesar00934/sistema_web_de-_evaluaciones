@@ -38,12 +38,18 @@ La ruta verifica el token y abre la pantalla para establecer contraseña. Tambi�
 - **Evaluaciones:** creación de preguntas dentro de la evaluación y copia opcional al banco; selección manual o automática 30/50/20; tres modos de puntaje, metadatos y catálogos persistentes. Encabezados de primera/siguientes páginas y biblioteca privada de imágenes, marcos, fondo, alumno y contactos editables. Guardado atómico con comprobación de revisiones. Las versiones fijan preguntas, claves, escala y formato institucional.
 - **PDF:** original, original con QR, con hoja añadida, con QR y hoja añadida; hoja separada y claves independientes. Una o dos columnas. Hojas A4 con las coordenadas originales, 24 filas objetivas por página y cuatro respuestas escritas por página. Incluye nombre institucional, logos opcionales, docente, grupo, periodo, unidad, fecha y contacto. Configuración permite marcos rectos/curvos, imagen central de fondo y marca de agua al pie. El diseño se recompuso en PDF-Lib; no se afirma equivalencia visual píxel a píxel con el editor Flutter. Los títulos desmesurados o enunciados escritos que no caben en dos líneas producen un error explícito para evitar texto recortado.
 - **Escáner:** carga o captura imágenes antes de elegir alumno/versión, con vista previa y opción de quitar archivos. **Escanear y guardar** inicia el reconocimiento y guardado solamente después de confirmar esos datos. Cada lote pertenece al mismo alumno; cámara HTTPS/localhost, hasta 50 imágenes, progreso de subida y error por archivo. El QR identifica examen/versión/página, no al alumno. OMR en Web Worker y OCR local opcional; las respuestas abiertas requieren evaluación docente.
-- **Corrección:** revisión de imagen y lecturas, transcripción editable, puntaje y rúbrica por ítem; relectura de copia guardada, deduplicación por ID/hash, conflicto por alumno/versión/página, comparación o reemplazo explícito. Se conservan revisiones manuales. La relectura usa la copia comprimida; para conservar toda la calidad inicial, procesa otra vez desde el archivo fuente local.
+- **Corrección:** compara la respuesta detectada, la clave y el puntaje automático de cada pregunta. Abre la evidencia para confirmar una opción o asignar un puntaje parcial con observación. Guardar recalcula la nota y las revisiones docentes se conservan al reprocesar. La relectura usa la copia comprimida de la hoja.
 - **Resultados y reportes:** paginación, filtros de área, bimestre, grupo, alumno, versión y fecha original del escaneo; perfil por alumno, promedios confirmados, distribución y refuerzo por tema con puntajes revisados. Exportaciones CSV/XLSX/PDF bajo los mismos filtros, hasta 10 000 filas y 4 MB. CSV protege celdas de fórmulas. No es una integración oficial con SIAGIE.
 - **Imágenes:** se guardan **después** de persistir respuestas/notas. El reconocimiento recibe el archivo original; posteriormente se crea JPEG legible y miniatura. Ningún original se guarda permanentemente por defecto. La copia no es una condición para conservar la nota. Se pueden seleccionar y borrar adjuntos con sus miniaturas, sin eliminar registros académicos. No hay borrado de alumnos, exámenes o notas en cascada desde archivos.
 - **Configuración y migración:** identidad institucional, dispositivo y consulta privada de registros históricos importados.
 
-El flujo multi dispositivo utiliza Supabase con la misma cuenta. Sustituye el receptor Wi-Fi y emparejamiento local, que no pueden trasladarse directamente al navegador. No incluye Bluetooth, funcionamiento sin conexión ni exportación web de paquetes `.cramerscan`. Hay un conversor de paquetes antiguos para la migración.
+El flujo multi dispositivo utiliza Supabase con la misma cuenta. Sustituye el receptor Wi-Fi y emparejamiento local, que no pueden trasladarse directamente al navegador. La aplicación necesita conexión para iniciar sesión, consultar evidencias y guardar. Hay un conversor de paquetes `.cramerscan` antiguos para la migración.
+
+### Lectura de escritura a mano
+
+Activa el lector opcional al escanear o ejecútalo desde una hoja guardada en Corrección. El navegador recorta las líneas de cada respuesta abierta y las transcribe en un Web Worker con TrOCR y WebAssembly. La primera lectura descarga aproximadamente 70 MB de archivos del modelo, más el motor. La inferencia puede reutilizar esos archivos si el navegador conserva su caché. Los recortes y las claves se mantienen fuera de las solicitudes al proveedor del modelo.
+
+El modelo [Xenova/trocr-small-handwritten](https://huggingface.co/Xenova/trocr-small-handwritten/tree/9ef961fec33b56615026fbe77b9da68d6237cddb) tiene licencia MIT y se usa en la revisión enlazada con pesos de 8 bits. [TrOCR](https://huggingface.co/microsoft/trocr-small-handwritten) fue ajustado con el corpus IAM de escritura en inglés y lee una línea a la vez. La prueba en Chrome cubre una muestra manuscrita en inglés y una segunda inferencia con la red desactivada. La exactitud en exámenes en español, números y fórmulas requiere validación con muestras representativas. El docente contrasta la propuesta con la hoja y asigna el puntaje.
 
 ## Seguridad y almacenamiento
 
@@ -75,6 +81,8 @@ npm run test:db
 npm run test:editor
 npm run build
 npm run load
+# Prueba de TrOCR en Chrome con descarga inicial y reutilización sin red
+node scripts/run.mjs handwriting-smoke
 # Con npm run start ejecutándose y Chrome instalado:
 npm run test:ui
 # Tras generar/renderizar la muestra PDF según docs/VERIFICATION.md:

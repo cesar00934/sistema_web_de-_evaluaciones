@@ -1,3 +1,4 @@
+import { cropWrittenAnswers } from "../lib/written-crops";
 import { readSheetIdentity } from "../lib/sheet-identity";
 import { type SheetPage } from "../lib/domain";
 import { processOmr } from "../lib/omr";
@@ -7,13 +8,15 @@ const ctx = self as unknown as {
 };
 ctx.onmessage = async (e) => {
   try {
-    const { file, pages, examId, versionId, pageNumber } = e.data as {
-      file: File;
-      pages: SheetPage[];
-      examId: string;
-      versionId: string;
-      pageNumber: number;
-    };
+    const { file, pages, examId, versionId, pageNumber, readWritten } =
+      e.data as {
+        file: File;
+        pages: SheetPage[];
+        examId: string;
+        versionId: string;
+        pageNumber: number;
+        readWritten: boolean;
+      };
     const hash = Array.from(
       new Uint8Array(
         await crypto.subtle.digest("SHA-256", await file.arrayBuffer()),
@@ -56,9 +59,19 @@ ctx.onmessage = async (e) => {
     if (!page) throw Error("Página fuera de la hoja.");
     let warning = "",
       answers;
+    let written: Awaited<ReturnType<typeof cropWrittenAnswers>> = [];
+    let writtenWarning: string | undefined;
     try {
       const result = processOmr(raster, page);
       answers = result.answers;
+      if (readWritten && page.written.length) {
+        try {
+          written = await cropWrittenAnswers(result.normalized, page);
+        } catch {
+          writtenWarning =
+            "No se pudo preparar el área de escritura. Revisa la imagen.";
+        }
+      }
       canvas.width = result.normalized.width;
       canvas.height = result.normalized.height;
       c.putImageData(
@@ -101,6 +114,8 @@ ctx.onmessage = async (e) => {
       warning,
       stored,
       thumbnail,
+      written,
+      writtenWarning,
       identity,
     });
   } catch (error) {

@@ -5,11 +5,13 @@ import { WorkspaceProvider } from "../../src/components/workspace-context";
 import { CatalogProvider } from "../../src/components/catalog";
 import { ExamEditor } from "../../src/components/exam-editor";
 import { Scanner } from "../../src/components/scanner";
+import { Results } from "../../src/components/results";
 import { browserClient } from "../../src/lib/supabase/client";
 Object.assign(window, { __parseStudentFile: parseStudentFile });
 const scanner = window.location.pathname === "/scanner";
+const review = window.location.pathname === "/review";
 async function mount() {
-  if (scanner) {
+  if (scanner || review) {
     // Local transport fixture only. The production entry never imports this file.
     const payload = btoa(
       JSON.stringify({
@@ -32,7 +34,15 @@ async function mount() {
       }}
     >
       <CatalogProvider>
-        <main className="main">{scanner ? <Scanner /> : <ExamEditor />}</main>
+        <main className="main">
+          {scanner ? (
+            <Scanner />
+          ) : review ? (
+            <Results mode="correccion" />
+          ) : (
+            <ExamEditor />
+          )}
+        </main>
       </CatalogProvider>
     </WorkspaceProvider>,
   );

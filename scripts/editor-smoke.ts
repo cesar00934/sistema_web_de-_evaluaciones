@@ -9,7 +9,12 @@ import { readFile, mkdir, writeFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { evaluationSchema, validateOwnedAssets } from "../src/lib/evaluation";
 import { generatePdf } from "../src/lib/pdf";
-import { sheetLayout, type Question, type Version } from "../src/lib/domain";
+import {
+  questionSchema,
+  sheetLayout,
+  type Question,
+  type Version,
+} from "../src/lib/domain";
 import { builtInAssets } from "../src/lib/editor-defaults";
 const owner = "11111111-1111-4111-8111-111111111111";
 async function main() {
@@ -65,6 +70,9 @@ async function main() {
     "design_assets",
     "versions",
     "students",
+    "results",
+    "scans",
+    "manual_grades",
   ]);
   const images = new Map<string, Buffer>();
   let commits = 0;
@@ -114,6 +122,36 @@ async function main() {
         json(result.rows[0].result);
         return;
       }
+      if (url.pathname === "/rest/v1/rpc/academic_summary") {
+        json(null);
+        return;
+      }
+      if (url.pathname === "/rest/v1/rpc/review_answer") {
+        const result = await db.query<{ result: unknown }>(
+          "select review_answer($1,$2,$3,$4,$5) as result",
+          [
+            body.p_version,
+            body.p_student,
+            body.p_question,
+            body.p_score,
+            JSON.stringify(body.p_rubric),
+          ],
+        );
+        json(result.rows[0].result);
+        return;
+      }
+      const evidence = `${owner}/review.png`;
+      if (url.pathname === `/storage/v1/object/sign/scans/${evidence}`) {
+        if (req.method === "POST") {
+          json({
+            signedURL: `/object/sign/scans/${evidence}?token=local-test`,
+          });
+        } else {
+          res.setHeader("Content-Type", "image/png");
+          res.end(images.get(evidence));
+        }
+        return;
+      }
       if (
         url.pathname.startsWith("/storage/v1/object/questions/") &&
         req.method === "POST"
@@ -153,7 +191,7 @@ async function main() {
         res.end(images.get(path));
         return;
       }
-      if (url.pathname === "/" || url.pathname === "/scanner") {
+      if (["/", "/scanner", "/review"].includes(url.pathname)) {
         res.setHeader("Content-Type", "text/html; charset=utf-8");
         res.end(
           '<html lang="es"><head><link rel="stylesheet" href="/globals.css"></head><body><div id="root"></div><script src="/harness.js"></script></body></html>',
@@ -198,15 +236,26 @@ async function main() {
           return;
         }
         assert.equal(req.method, "GET");
+        const reviewJoins =
+          table === "results"
+            ? `, (select row_to_json(s) from students s where s.owner_id=t.owner_id and s.id=t.student_id) as students,
+             (select to_jsonb(v) || jsonb_build_object('exams',row_to_json(e)) from versions v join exams e
+              on e.owner_id=v.owner_id and e.id=v.exam_id where v.owner_id=t.owner_id and v.id=t.version_id) as versions`
+            : table === "scans"
+              ? `, (select coalesce(json_agg(a),'[]') from answers a where a.owner_id=t.owner_id and a.scan_id=t.id) as answers,
+               (select coalesce(json_agg(a),'[]') from attachments a where a.owner_id=t.owner_id and a.scan_id=t.id) as attachments`
+              : "";
         let rows = (
           await db.query<Record<string, unknown>>(
-            `select * from public.${table} where owner_id=$1`,
+            `select t.* ${reviewJoins} from public.${table} t where t.owner_id=$1`,
             [owner],
           )
         ).rows;
         for (const [k, v] of url.searchParams) {
           if (v.startsWith("eq."))
             rows = rows.filter((r) => String(r[k]) === v.slice(3));
+          if (v.startsWith("gt."))
+            rows = rows.filter((r) => Number(r[k]) > Number(v.slice(3)));
           if (v.startsWith("ilike."))
             rows = rows.filter((r) =>
               String(r[k])
@@ -826,6 +875,238 @@ async function main() {
         ["auto-b", 1],
       ],
     );
+    const reviewQuestions = [
+      questionSchema.parse({
+        id: "review-vf",
+        type: "trueFalse",
+        prompt: "Marca verdadero o falso",
+        trueFalseStatements: ["El agua cambia de estado"],
+        trueFalseAnswers: [true],
+        score: 2,
+      }),
+      questionSchema.parse({
+        id: "review-written",
+        type: "openResponse",
+        prompt: "Explica tu respuesta",
+        referenceAnswer: "Cambio de estado por calor",
+        score: 2,
+      }),
+      questionSchema.parse({
+        id: "review-match",
+        type: "matching",
+        prompt: "Relaciona",
+        leftColumn: ["Hielo"],
+        rightColumn: ["Sólido", "Gas"],
+        matchingAnswers: [0],
+        score: 1,
+      }),
+    ];
+    const reviewPages = sheetLayout(reviewQuestions);
+    await db.query(
+      "insert into versions(id,exam_id,label,questions,items,page_count,scale_maximum) values('review-version',$1,'Versión de revisión',$2,$3,2,20)",
+      [
+        examRow.id,
+        JSON.stringify(reviewQuestions),
+        JSON.stringify(reviewPages.flatMap((p) => [...p.items, ...p.written])),
+      ],
+    );
+    const transcript = JSON.stringify({
+      format: "cramer-written-v1",
+      answers: [
+        {
+          questionId: "review-written",
+          label: "2",
+          text: "Se derrite",
+          engine: "Fixture",
+        },
+      ],
+    });
+    for (const layout of reviewPages) {
+      await db.query("select commit_scan($1,$2,'reject')", [
+        JSON.stringify({
+          id: `review-${layout.pageNumber}`,
+          version_id: "review-version",
+          student_id: "scanner-student",
+          page_number: layout.pageNumber,
+          image_hash: String(layout.pageNumber).repeat(64),
+          transcript: layout.written.length ? transcript : "",
+        }),
+        JSON.stringify(
+          [...layout.items, ...layout.written].map((item) => ({
+            questionId: item.questionId,
+            selected: item.type === "openResponse" ? null : 1,
+            status: item.type === "openResponse" ? "manualReview" : "answered",
+            confidence: 1,
+          })),
+        ),
+      ]);
+    }
+    const markers = [
+      [32, 32],
+      [550.28, 32],
+      [550.28, 796.89],
+      [32, 796.89],
+    ]
+      .map(([x, y]) => `<rect x="${x}" y="${y}" width="13" height="13"/>`)
+      .join("");
+    const rules = [250, 269, 288, 307]
+      .map((y) => `<path d="M65 ${y}H530" stroke="#999" stroke-width="0.5"/>`)
+      .join("");
+    const evidence = await sharp(
+      Buffer.from(
+        `<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1414" viewBox="0 0 595.28 841.89"><rect width="100%" height="100%" fill="white"/>${markers}${rules}<path d="M90 261q4-12 8 0t8 0t8 0t8 0" fill="none" stroke="black" stroke-width="2"/></svg>`,
+      ),
+    )
+      .png()
+      .toBuffer();
+    const evidencePath = `${owner}/review.png`;
+    images.set(evidencePath, evidence);
+    await db.query(
+      "insert into attachments(id,scan_id,path,bytes,mime) values('review-evidence','review-2',$1,$2,'image/png')",
+      [evidencePath, evidence.length],
+    );
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto(`${base}/review`);
+    const reviewRow = page
+      .getByRole("row")
+      .filter({ hasText: "Versión de revisión" });
+    const openReview = () =>
+      reviewRow.getByRole("button", { name: "Revisar", exact: true }).click();
+    await openReview();
+    const writing = page.getByRole("article", {
+      name: "Revisar pregunta 2",
+      exact: true,
+    });
+    const vf = page.getByRole("article", {
+      name: "Revisar pregunta 1.1",
+      exact: true,
+    });
+    await vf.waitFor();
+    assert.deepEqual(
+      await vf.locator(".answer-comparison strong").allTextContents(),
+      ["Falso", "Verdadero", "0 / 2"],
+    );
+    const matchReview = page.getByRole("article", {
+      name: "Revisar pregunta 3.1",
+      exact: true,
+    });
+    assert.deepEqual(
+      await matchReview.locator(".answer-comparison strong").allTextContents(),
+      ["B) Gas", "A) Sólido", "0 / 1"],
+    );
+    await writing
+      .getByRole("paragraph")
+      .filter({ hasText: /^Se derrite$/ })
+      .waitFor();
+    await writing
+      .getByRole("link", { name: "Ver evidencia de la hoja 2" })
+      .click();
+    await page.locator("#evidencia-review-2 img").waitFor();
+    const crops = await page.evaluate(
+      async ({ pages, examId, path }) => {
+        const blob = await (await fetch(path)).blob();
+        const worker = new Worker("/workers/scan.worker.ts");
+        try {
+          return await new Promise<{
+            warning: string;
+            writtenWarning?: string;
+            written: { questionId: string; lines: Blob[] }[];
+          }>((resolve, reject) => {
+            worker.onmessage = (event) => resolve(event.data);
+            worker.onerror = (event) => reject(Error(event.message));
+            worker.postMessage({
+              file: new File([blob], "fixture.png"),
+              pages,
+              examId,
+              versionId: "review-version",
+              pageNumber: 2,
+              readWritten: true,
+            });
+          });
+        } finally {
+          worker.terminate();
+        }
+      },
+      {
+        pages: reviewPages,
+        examId: examRow.id,
+        path: `/storage/v1/object/sign/scans/${evidencePath}`,
+      },
+    );
+    assert.equal(crops.warning, "");
+    assert.equal(crops.writtenWarning, undefined);
+    assert.equal(crops.written[0].questionId, "review-written");
+    assert.equal(crops.written[0].lines.length, 1);
+    await vf
+      .getByText("Rectificar respuesta o puntaje", { exact: true })
+      .click();
+    const select = vf.getByRole("combobox");
+    const score = vf.getByRole("spinbutton");
+    await select.selectOption("0");
+    assert.equal(await score.inputValue(), "2");
+    await select.selectOption("blank");
+    assert.equal(await score.inputValue(), "0");
+    await select.selectOption("0");
+    await score.fill("1.5");
+    await vf
+      .getByLabel("Motivo u observación")
+      .fill("Marca comprobada en la hoja");
+    await vf
+      .getByRole("button", { name: "Guardar revisión y recalcular nota" })
+      .click();
+    await vf.getByText("Puntaje docente 1.5 / 2").waitFor();
+    await page.getByText("Nota 6.00 · 1 pendiente", { exact: true }).waitFor();
+    assert.equal(
+      (
+        await db.query<{ selected: number }>(
+          "select selected from answers where scan_id='review-1' and question_id='review-vf#0'",
+        )
+      ).rows[0].selected,
+      1,
+    );
+    await page.screenshot({
+      path: "artifacts/ui/review-desktop.png",
+      fullPage: true,
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload();
+    await openReview();
+    await vf
+      .getByText("Marca comprobada en la hoja", { exact: false })
+      .waitFor();
+    assert.equal(
+      await page
+        .locator("body")
+        .evaluate((b) => b.scrollWidth > window.innerWidth),
+      false,
+    );
+    await page.screenshot({
+      path: "artifacts/ui/review-mobile.png",
+      fullPage: true,
+    });
+    await writing
+      .getByText("Revisar y confirmar puntaje", { exact: true })
+      .click();
+    await writing
+      .getByLabel("Transcripción revisada")
+      .fill("Se derrite con el calor");
+    await writing.getByRole("button", { name: "Puntaje completo: 2" }).click();
+    await writing
+      .getByRole("button", { name: "Guardar revisión y recalcular nota" })
+      .click();
+    await page.getByText("Nota 14.00 · Confirmada", { exact: true }).waitFor();
+    await writing
+      .getByText("Se derrite con el calor", { exact: true })
+      .filter({ visible: true })
+      .waitFor();
+    assert.equal(
+      (
+        await db.query<{ transcript: string }>(
+          "select transcript from scans where id='review-2'",
+        )
+      ).rows[0].transcript,
+      transcript,
+    );
     assert.deepEqual(errors, []);
     const checks = [
       "QR real: versión/página automáticas, imagen girada, lote con dos versiones y página inválida bloqueada; ningún guardado antes del botón",
@@ -839,6 +1120,7 @@ async function main() {
       "Editor escritorio/móvil sin errores JS ni desbordamiento",
       "Escáner: miniatura antes de asignar alumno, quitar archivo y ningún reconocimiento/guardado hasta pulsar el botón",
       "Escanear y guardar: Worker real y commit_scan SQL real, resultado del alumno y cola vacía tras guardar",
+      "Corrección: evidencia, recorte de hoja sintética, claves VF/relación, transcripción, puntaje parcial y recálculo SQL tras recargar",
     ];
     await writeFile(
       "artifacts/ui/editor-smoke.json",

@@ -375,19 +375,32 @@ export function Scanner() {
           file,
           assignedVersion,
           batch[i].identity?.pageNumber ?? page,
+          ocr,
         );
         if (!result.ok) throw Error(result.error);
         let transcript = "";
-        if (ocr) {
-          update(job.id, { state: "Transcribiendo texto localmente…" });
-          const { createWorker } = await import("tesseract.js"),
-            worker = await createWorker("spa", 1, { logger: () => {} });
+        if (result.writtenWarning) result.warning = result.writtenWarning;
+        if (result.written?.length) {
           try {
-            transcript = (await worker.recognize(file)).data.text;
-          } finally {
-            await worker.terminate();
+            const { recognizeHandwriting } =
+              await import("@/lib/handwriting-client");
+            const answers = await recognizeHandwriting(result.written, (text) =>
+              update(job.id, { state: text }),
+            );
+            transcript = JSON.stringify({
+              format: "cramer-written-v1",
+              answers,
+            });
+          } catch (error) {
+            result.warning = [
+              result.warning,
+              `Texto pendiente: ${errorText(error)}`,
+            ]
+              .filter(Boolean)
+              .join(" · ");
           }
         }
+
         const scan = {
           id: job.id,
           version_id: assignedVersion.id,
@@ -688,11 +701,14 @@ export function Scanner() {
               disabled={busy}
               onChange={(e) => setOcr(e.target.checked)}
             />
-            Transcribir texto con OCR local (más lento)
+            Leer respuestas escritas con el lector local
           </label>
           <p className="muted">
-            El OCR propone texto; las respuestas abiertas las califica el
-            docente. La primera ejecución descarga el motor y el idioma.
+            El lector manuscrito se ejecuta en este dispositivo. La primera vez
+            descarga el modelo (aprox. 70 MB más el motor) y después puede
+            reutilizar su caché. No envía la imagen a una IA externa. Compara
+            siempre el texto con la hoja; el puntaje de respuestas abiertas lo
+            confirma el docente.
           </p>
           <div className="notice">
             Las páginas sin marcadores o con lectura dudosa se guardan

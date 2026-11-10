@@ -849,6 +849,8 @@ textarea {
 .scan-review summary {
   cursor: pointer;
   font-weight: 700;
+}
+.scan-review[open] summary {
   margin-bottom: 14px;
 }
 .scan-review .button,
@@ -1492,5 +1494,51 @@ textarea {
   }
   .option-row .check {
     min-width: 45px;
+  }
+}
+.answer-review {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 20px;
+  margin: 16px 0;
+  overflow-wrap: anywhere;
+}
+.answer-review h4 {
+  margin: 0;
+  font-size: 16px;
+}
+.evidence-link {
+  color: var(--green);
+  text-decoration: underline;
+}
+.answer-comparison {
+  display: grid;
+  grid-template-columns: 2fr 2fr 1fr;
+  gap: 16px;
+  margin: 16px 0;
+}
+.answer-comparison small,
+.answer-comparison strong {
+  display: block;
+}
+.answer-comparison small {
+  color: #60756f;
+  margin-bottom: 6px;
+}
+.grade-editor summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: #007f72;
+  padding: 12px 0;
+}
+.written-text {
+  white-space: pre-wrap;
+}
+@media (max-width: 700px) {
+  .answer-comparison {
+    grid-template-columns: 1fr;
+  }
+  .answer-review {
+    padding: 14px;
   }
 }
