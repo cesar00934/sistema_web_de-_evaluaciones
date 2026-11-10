@@ -12,7 +12,7 @@ Con copias de 300 KB, 1 GB representa aproximadamente 3 300 imágenes antes de d
 
 Hobby permite **uso personal no comercial**, según [sus condiciones de plan](https://vercel.com/docs/plans/hobby). Una plataforma institucional no debe darse por elegible automáticamente, especialmente en una institución privada/comercial. Confirma elegibilidad con Vercel o presupuesta un plan apropiado antes de publicar. No se eligió ni contrató un plan de pago.
 
-La documentación de [funciones](https://vercel.com/docs/functions/limitations) indica, con Fluid Compute, 300 s máximos en Hobby, 2 GB/1 CPU y límite de cuerpo de solicitud/respuesta de 4.5 MB. La aplicación fija 60 s para PDF/reportes y rechaza archivos de salida mayores de 4 MB. Las imágenes suben directamente a Supabase Storage; reconocimiento y compresión se ejecutan en el navegador.
+La documentación de [funciones](https://vercel.com/docs/functions/limitations) indica, con Fluid Compute, 300 s máximos en Hobby, 2 GB/1 CPU y un límite de 4.5 MB para cuerpos de solicitud y respuestas sin streaming. La aplicación fija 60 s para PDF y reportes. Las evaluaciones y sus vistas previas se sirven por streaming. Las exportaciones de reportes tienen un límite de 4 MB. Las imágenes suben directamente a Supabase Storage; reconocimiento y compresión se ejecutan en el navegador.
 
 La [tabla Hobby](https://vercel.com/docs/plans/hobby) indica 100 GB de transferencia rápida, 10 GB de origen, un millón de invocaciones y 4 horas de CPU activa incluidas. Exceder cuotas puede impedir el uso hasta su renovación; gratuito no significa capacidad ilimitada.
 

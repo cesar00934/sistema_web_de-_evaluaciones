@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { authenticated } from "@/lib/supabase/server";
 import { generatePdf, type PdfMode } from "@/lib/pdf";
 import { pdfAssetLoader } from "@/lib/pdf-assets";
+import { pdfResponse } from "@/lib/pdf-response";
 import type { Exam } from "@/lib/domain";
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -69,17 +70,7 @@ export async function GET(
       mode,
       pdfAssetLoader(db),
     );
-    if (bytes.length > 4_000_000)
-      throw Error(
-        "El PDF supera 4 MB. Reduce imágenes o divide la evaluación.",
-      );
-    return new NextResponse(Buffer.from(bytes), {
-      headers: {
-        "Content-Type": "application/pdf",
-        "Content-Disposition": 'attachment; filename="evaluacion-cramer.pdf"',
-        "Cache-Control": "private, no-store",
-      },
-    });
+    return pdfResponse(bytes, "evaluacion-cramer.pdf");
   } catch (e) {
     return NextResponse.json(
       {

@@ -1,8 +1,10 @@
 import { test } from "node:test";
+import { randomBytes } from "node:crypto";
 import assert from "node:assert/strict";
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { PDFDocument } from "pdf-lib";
 import { generatePdf } from "../src/lib/pdf";
+import { pdfResponse } from "../src/lib/pdf-response";
 import {
   institutionalDefaults,
   builtInAssets,
@@ -13,6 +15,33 @@ import {
   type Exam,
   type Version,
 } from "../src/lib/domain";
+test("PDF downloads stream every byte beyond Vercel's buffered response limit", async () => {
+  const pdf = await PDFDocument.create();
+  pdf.addPage();
+  await pdf.attach(randomBytes(4_600_000), "fixture.bin");
+  const bytes = await pdf.save();
+  assert.ok(bytes.byteLength > 4_500_000);
+  const response = pdfResponse(bytes, "evaluacion-cramer.pdf");
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Content-Type"), "application/pdf");
+  assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+  assert.equal(response.headers.get("Content-Length"), null);
+  assert.equal(
+    response.headers.get("Content-Disposition"),
+    'attachment; filename="evaluacion-cramer.pdf"',
+  );
+  const reader = response.body!.getReader();
+  const first = await reader.read();
+  assert.equal(first.done, false);
+  assert.ok(first.value!.byteLength < bytes.byteLength);
+  const chunks = [first.value!];
+  for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read())
+    chunks.push(chunk.value);
+  const received = Buffer.concat(chunks);
+  assert.deepEqual(received, Buffer.from(bytes));
+  assert.equal((await PDFDocument.load(received)).getPageCount(), 1);
+});
+
 const questions = [
   questionSchema.parse({
     id: "choice",
