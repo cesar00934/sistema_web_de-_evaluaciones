@@ -117,6 +117,7 @@ export function Scanner() {
     setPreparing(true);
     setMessage("");
     const errors: string[] = [];
+    const verifiedVersions = new Map<string, Version>();
     try {
       for (const file of files) {
         let url = "";
@@ -149,17 +150,26 @@ export function Scanner() {
             const { identifySheet } = await import("@/lib/sheet-identity");
             item.identity = identifySheet(img);
             if (item.identity) {
-              const { data, error } = await browserClient()
-                .from("versions")
-                .select("id,exam_id,label,questions,items,page_count")
-                .eq("owner_id", ownerId)
-                .eq("id", item.identity.versionId)
-                .eq("exam_id", item.identity.examId)
-                .single();
-              if (error || !data)
-                throw Error(
-                  "El QR identifica una versión que no está disponible en tu cuenta. Comprueba el examen y vuelve a cargar la hoja.",
-                );
+              const key = JSON.stringify([
+                item.identity.examId,
+                item.identity.versionId,
+              ]);
+              let data = verifiedVersions.get(key);
+              if (!data) {
+                const result = await browserClient()
+                  .from("versions")
+                  .select("id,exam_id,label,questions,items,page_count")
+                  .eq("owner_id", ownerId)
+                  .eq("id", item.identity.versionId)
+                  .eq("exam_id", item.identity.examId)
+                  .single();
+                if (result.error || !result.data)
+                  throw Error(
+                    "El QR identifica una versión que no está disponible en tu cuenta. Comprueba el examen y vuelve a cargar la hoja.",
+                  );
+                data = result.data as Version;
+                verifiedVersions.set(key, data);
+              }
               if (item.identity.pageNumber > sheetLayout(data.questions).length)
                 throw Error(
                   "El QR indica una página que no pertenece a esta versión.",
@@ -286,10 +296,13 @@ export function Scanner() {
       conflict: undefined,
       disposition: "inserted",
     });
-    await attach({ ...job, path });
+    await attach({ ...job, path }, { db, user });
   }
-  async function attach(job: Job) {
-    const { db, user } = await requireUser();
+  async function attach(
+    job: Job,
+    session?: Awaited<ReturnType<typeof requireUser>>,
+  ) {
+    const { db, user } = session ?? (await requireUser());
     const path = job.path ?? `${user.id}/${job.scan!.id}.jpg`;
     let last: unknown;
     for (let attempt = 0; attempt < 2; attempt++)
@@ -376,6 +389,7 @@ export function Scanner() {
           assignedVersion,
           batch[i].identity?.pageNumber ?? page,
           ocr,
+          attachment,
         );
         if (!result.ok) throw Error(result.error);
         let transcript = "";

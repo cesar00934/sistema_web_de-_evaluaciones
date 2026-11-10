@@ -8,14 +8,15 @@ export interface Recognition {
   answers: Answer[];
   page: number;
   warning: string;
-  stored: Blob;
-  thumbnail: Blob;
+  stored?: Blob;
+  thumbnail?: Blob;
 }
 export function recognize(
   file: File,
   version: Version,
   pageNumber: number,
   readWritten = false,
+  saveEvidence = true,
 ) {
   return new Promise<Recognition>((resolve, reject) => {
     const worker = new Worker(
@@ -42,6 +43,7 @@ export function recognize(
       versionId: version.id,
       pageNumber,
       readWritten,
+      saveEvidence,
     });
   });
 }

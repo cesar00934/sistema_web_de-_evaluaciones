@@ -109,14 +109,17 @@ export function useRows<T>(
   }, [table, columns, filter, searchColumn, page, order, ownerId]);
   useEffect(() => {
     let active = true;
-    const t = setTimeout(() => {
-      if (active) void load();
-    }, 250);
+    const t = setTimeout(
+      () => {
+        if (active) void load();
+      },
+      filter ? 250 : 0,
+    );
     return () => {
       active = false;
       clearTimeout(t);
     };
-  }, [load]);
+  }, [filter, load]);
   return { rows, count, error, loading, load };
 }
 export function download(data: Blob, name: string) {

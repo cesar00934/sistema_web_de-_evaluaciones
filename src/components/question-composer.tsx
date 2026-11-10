@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { questionSchema, type Question } from "@/lib/domain";
 import { CatalogInput } from "./catalog";
-import { PrivateImage } from "./records";
+import { PrivateImage } from "./private-image";
 import { errorText } from "./common";
 import { useWorkspace } from "./workspace-context";
 import {

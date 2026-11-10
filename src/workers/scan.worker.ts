@@ -8,15 +8,23 @@ const ctx = self as unknown as {
 };
 ctx.onmessage = async (e) => {
   try {
-    const { file, pages, examId, versionId, pageNumber, readWritten } =
-      e.data as {
-        file: File;
-        pages: SheetPage[];
-        examId: string;
-        versionId: string;
-        pageNumber: number;
-        readWritten: boolean;
-      };
+    const {
+      file,
+      pages,
+      examId,
+      versionId,
+      pageNumber,
+      readWritten,
+      saveEvidence = true,
+    } = e.data as {
+      file: File;
+      pages: SheetPage[];
+      examId: string;
+      versionId: string;
+      pageNumber: number;
+      readWritten: boolean;
+      saveEvidence?: boolean;
+    };
     const hash = Array.from(
       new Uint8Array(
         await crypto.subtle.digest("SHA-256", await file.arrayBuffer()),
@@ -72,17 +80,19 @@ ctx.onmessage = async (e) => {
             "No se pudo preparar el área de escritura. Revisa la imagen.";
         }
       }
-      canvas.width = result.normalized.width;
-      canvas.height = result.normalized.height;
-      c.putImageData(
-        new ImageData(
-          new Uint8ClampedArray(result.normalized.data),
-          canvas.width,
-          canvas.height,
-        ),
-        0,
-        0,
-      );
+      if (saveEvidence) {
+        canvas.width = result.normalized.width;
+        canvas.height = result.normalized.height;
+        c.putImageData(
+          new ImageData(
+            new Uint8ClampedArray(result.normalized.data),
+            canvas.width,
+            canvas.height,
+          ),
+          0,
+          0,
+        );
+      }
     } catch (error) {
       warning = error instanceof Error ? error.message : "No se pudo reconocer";
       answers = [...page.items, ...page.written].map((i) => ({
@@ -93,19 +103,21 @@ ctx.onmessage = async (e) => {
       }));
     }
     // Only now generate the storage copy. The source was never re-encoded for recognition.
-    const stored = await canvas.convertToBlob({
-      type: "image/jpeg",
-      quality: 0.86,
-    });
-    const small = new OffscreenCanvas(
-      240,
-      Math.round((canvas.height / canvas.width) * 240),
-    );
-    small.getContext("2d")!.drawImage(canvas, 0, 0, small.width, small.height);
-    const thumbnail = await small.convertToBlob({
-      type: "image/jpeg",
-      quality: 0.72,
-    });
+    let stored: Blob | undefined;
+    let thumbnail: Blob | undefined;
+    if (saveEvidence) {
+      const small = new OffscreenCanvas(
+        240,
+        Math.round((canvas.height / canvas.width) * 240),
+      );
+      small
+        .getContext("2d")!
+        .drawImage(canvas, 0, 0, small.width, small.height);
+      [stored, thumbnail] = await Promise.all([
+        canvas.convertToBlob({ type: "image/jpeg", quality: 0.86 }),
+        small.convertToBlob({ type: "image/jpeg", quality: 0.72 }),
+      ]);
+    }
     ctx.postMessage({
       ok: true,
       hash,

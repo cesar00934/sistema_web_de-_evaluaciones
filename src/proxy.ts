@@ -7,6 +7,12 @@ export async function proxy(request: NextRequest) {
   )
     return NextResponse.next();
   let response = NextResponse.next({ request });
+  // Route handlers own session validation and can write refreshed cookies.
+  // Keep the workspace gate here for client navigations with a reused layout.
+  if (!request.nextUrl.pathname.startsWith("/sistema")) {
+    response.headers.set("Cache-Control", "private, no-store");
+    return response;
+  }
   const db = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL,
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
@@ -26,11 +32,12 @@ export async function proxy(request: NextRequest) {
   const {
     data: { user },
   } = await db.auth.getUser();
-  if (!user && request.nextUrl.pathname.startsWith("/sistema")) {
+  if (!user) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     const redirect = NextResponse.redirect(url);
     response.cookies.getAll().forEach((c) => redirect.cookies.set(c));
+    redirect.headers.set("Cache-Control", "private, no-store");
     return redirect;
   }
   response.headers.set("Cache-Control", "private, no-store");

@@ -6,13 +6,14 @@ import {
   useState,
   useCallback,
   useId,
+  useRef,
   type ReactNode,
 } from "react";
 import { browserClient } from "@/lib/supabase/client";
 import { catalogDefaults, builtInAssets } from "@/lib/editor-defaults";
 import { useWorkspace } from "./workspace-context";
 import { errorText } from "./common";
-import { PrivateImage } from "./records";
+import { PrivateImage } from "./private-image";
 import {
   imageAccept,
   prepareQuestionImage,
@@ -22,6 +23,7 @@ interface Catalog {
   options: Record<string, string[]>;
   save: (kind: string, value: string) => Promise<void>;
   reload: () => Promise<void>;
+  loadIfNeeded: () => void;
   error: string;
 }
 const CatalogContext = createContext<Catalog | null>(null);
@@ -29,6 +31,7 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
   const { id } = useWorkspace(),
     [options, setOptions] = useState(catalogDefaults),
     [error, setError] = useState("");
+  const loadedOwnerRef = useRef<string | null>(null);
   const reload = useCallback(async () => {
     const db = browserClient();
     const [custom, questions, teachers, courses] = await Promise.all([
@@ -75,10 +78,11 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       );
     else setError("");
   }, [id]);
-  useEffect(() => {
-    const timer = setTimeout(() => void reload(), 0);
-    return () => clearTimeout(timer);
-  }, [reload]);
+  const loadIfNeeded = useCallback(() => {
+    if (loadedOwnerRef.current === id) return;
+    loadedOwnerRef.current = id;
+    void reload();
+  }, [id, reload]);
   async function save(kind: string, value: string) {
     if (!value.trim()) return;
     const { error } = await browserClient()
@@ -94,13 +98,19 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
     }));
   }
   return (
-    <CatalogContext.Provider value={{ options, save, reload, error }}>
+    <CatalogContext.Provider
+      value={{ options, save, reload, loadIfNeeded, error }}
+    >
       {children}
     </CatalogContext.Provider>
   );
 }
-export function useCatalog() {
+export function useCatalog(loadOptions = true) {
   const c = useContext(CatalogContext);
+  const load = c?.loadIfNeeded;
+  useEffect(() => {
+    if (loadOptions) load?.();
+  }, [loadOptions, load]);
   if (!c) throw Error("Falta catálogo");
   return c;
 }

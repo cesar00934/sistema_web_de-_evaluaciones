@@ -42,7 +42,7 @@ export function Shell({
   const router = useRouter(),
     path = usePathname(),
     [open, setOpen] = useState(false);
-  const { error: catalogError } = useCatalog();
+  const { error: catalogError } = useCatalog(false);
   return (
     <div className="app">
       <aside className={open ? "sidebar open" : "sidebar"}>
@@ -59,6 +59,7 @@ export function Shell({
             <Link
               key={slug}
               href={`/sistema${slug ? `/${slug}` : ""}`}
+              prefetch={false}
               onClick={() => setOpen(false)}
               className={
                 path === `/sistema${slug ? `/${slug}` : ""}` ? "active" : ""
@@ -72,6 +73,7 @@ export function Shell({
             <Link
               className={path === "/sistema/administracion" ? "active" : ""}
               href="/sistema/administracion"
+              prefetch={false}
             >
               <Users size={19} />
               Administración

@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { Heading, Empty, Pager, errorText, download } from "./common";
-import { PrivateImage } from "./records";
+import { PrivateImage } from "./private-image";
 import { browserClient } from "@/lib/supabase/client";
 import {
   emptyFilters,
@@ -93,6 +93,7 @@ export function Results({ mode }: { mode: string }) {
       if (error) throw error;
       setRows(data as unknown as ResultRow[]);
       setCount(count ?? 0);
+      if (mode !== "reportes") return;
       const { data: summary, error: se } = await db.rpc("academic_summary", {
         p_area: filters.area,
         p_bimester: filters.bimester,
@@ -109,11 +110,18 @@ export function Results({ mode }: { mode: string }) {
     } catch (e) {
       setMessage(errorText(e));
     }
-  }, [filters, page]);
+  }, [filters, page, mode]);
   useEffect(() => {
-    const t = setTimeout(() => void load(), 300);
+    const searching =
+      filters.area ||
+      filters.bimester ||
+      filters.grade ||
+      filters.section ||
+      filters.student ||
+      filters.version;
+    const t = setTimeout(() => void load(), searching ? 300 : 0);
     return () => clearTimeout(t);
-  }, [load]);
+  }, [filters, load]);
   async function open(result: ResultRow) {
     try {
       const db = browserClient(),
@@ -539,6 +547,7 @@ export function Results({ mode }: { mode: string }) {
                           review.version,
                           scan.page_number,
                           true,
+                          false,
                         );
                         if (!detected.ok) throw Error(detected.error);
                         if (detected.page !== scan.page_number)
@@ -597,6 +606,8 @@ export function Results({ mode }: { mode: string }) {
                         }),
                         review.version,
                         scan.page_number,
+                        false,
+                        false,
                       );
                       if (!result.ok) throw Error(result.error);
                       if (result.page !== scan.page_number)

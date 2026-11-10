@@ -197,7 +197,10 @@ export function processOmr(
         sy = Math.min(image.height - 1, Math.max(0, Math.round(p.y))),
         src = (sy * image.width + sx) * 4,
         dst = (y * w + x) * 4;
-      data.set(image.data.subarray(src, src + 4), dst);
+      data[dst] = image.data[src];
+      data[dst + 1] = image.data[src + 1];
+      data[dst + 2] = image.data[src + 2];
+      data[dst + 3] = image.data[src + 3];
       lum[y * w + x] = g[sy * image.width + sx];
     }
   const at = (x: number, y: number) =>
@@ -257,12 +260,13 @@ export function processOmr(
         }
     return ink / Math.max(1, count) >= 0.075;
   }
-  const visible = Array.from(
-      { length: 24 },
-      (_, row) =>
-        Array.from({ length: 8 }, (_, o) => printed(row, o)).filter(Boolean)
-          .length >= 2,
-    ),
+  const visible = Array.from({ length: 24 }, (_, row) => {
+      let options = 0;
+      for (let option = 0; option < 8; option++) {
+        if (printed(row, option) && ++options === 2) return true;
+      }
+      return false;
+    }),
     last = visible.lastIndexOf(true),
     printedRows = last + 1;
   if (

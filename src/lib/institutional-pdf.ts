@@ -144,10 +144,17 @@ export async function renderInstitutionalQuestions(
   ascentRatios.set(bold, ttfAscent(cambriaBytes));
   ascentRatios.set(italic, ttfAscent(italicBytes));
   ascentRatios.set(regular, ttfAscent(robotoBytes));
-  const images = new Map<string, PDFImage>();
+  const images = new Map<string, Promise<PDFImage>>();
   async function image(asset: unknown) {
     if (typeof asset !== "string" || !asset) return null;
-    if (images.has(asset)) return images.get(asset)!;
+    let pending = images.get(asset);
+    if (!pending) {
+      pending = embedImage(asset);
+      images.set(asset, pending);
+    }
+    return pending;
+  }
+  async function embedImage(asset: string) {
     const builtin = builtInAssets.find((a) => a.id === asset);
     if (!loadImage && !builtin)
       throw Error("No se pudo cargar una imagen institucional");
@@ -162,13 +169,14 @@ export async function renderInstitutionalQuestions(
     } catch {
       embedded = await pdf.embedJpg(bytes);
     }
-    images.set(asset, embedded);
     return embedded;
   }
-  const first = await image(decoration.headerFirst || decoration.logoLeft),
-    following = await image(decoration.headerFollowing || decoration.logoRight),
-    central = await image(decoration.centralImage),
-    watermark = await image(decoration.watermark);
+  const [first, following, central, watermark] = await Promise.all([
+    image(decoration.headerFirst || decoration.logoLeft),
+    image(decoration.headerFollowing || decoration.logoRight),
+    image(decoration.centralImage),
+    image(decoration.watermark),
+  ]);
   const text = (
     page: PDFPage,
     value: string,
@@ -684,8 +692,13 @@ export async function renderInstitutionalQuestions(
     // Measure once, then paginate consecutive prefixes before splitting columns.
     // Splitting the entire block first can put question 4 on a page before 3.
     const measured: { ops: Op[]; height: number }[] = [];
-    for (const { q, index } of group.questions) {
-      measured.push(await questionOps(q, index, 0));
+    for (let i = 0; i < group.questions.length; i += 4) {
+      const batch = group.questions.slice(i, i + 4);
+      measured.push(
+        ...(await Promise.all(
+          batch.map(({ q, index }) => questionOps(q, index, 0)),
+        )),
+      );
     }
     let start = 0;
     let titlePending = titleHeight > 0;
