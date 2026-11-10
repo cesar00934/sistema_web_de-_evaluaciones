@@ -3,7 +3,9 @@ import { randomBytes } from "node:crypto";
 import assert from "node:assert/strict";
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { PDFDocument } from "pdf-lib";
+import sharp from "sharp";
 import { generatePdf } from "../src/lib/pdf";
+import { optimizePdfImage } from "../src/lib/pdf-image";
 import { pdfResponse } from "../src/lib/pdf-response";
 import {
   institutionalDefaults,
@@ -35,7 +37,11 @@ test("PDF downloads stream every byte beyond Vercel's buffered response limit", 
   assert.equal(first.done, false);
   assert.ok(first.value!.byteLength < bytes.byteLength);
   const chunks = [first.value!];
-  for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read())
+  for (
+    let chunk = await reader.read();
+    !chunk.done;
+    chunk = await reader.read()
+  )
     chunks.push(chunk.value);
   const received = Buffer.concat(chunks);
   assert.deepEqual(received, Buffer.from(bytes));
@@ -107,6 +113,67 @@ const pages = sheetLayout(questions),
     items: pages.flatMap((p) => [...p.items, ...p.written]),
     page_count: pages.length,
   };
+test("PDF optimization reduces large question images and keeps transparent WebP artwork", async () => {
+  const source = await sharp(randomBytes(2000 * 1250 * 3), {
+    raw: { width: 2000, height: 1250, channels: 3 },
+  })
+    .png()
+    .toBuffer();
+  const optimized = await optimizePdfImage(source);
+  const info = await sharp(optimized).metadata();
+  assert.equal(info.width, 1600);
+  assert.equal(info.height, 1000);
+  assert.equal(info.format, "jpeg");
+  const illustrated = {
+    ...version,
+    questions: [
+      { ...questions[0], imagePath: "question-photo" },
+      ...questions.slice(1),
+    ],
+  };
+  const load = (photo: Buffer) => async (asset: string) => {
+    if (asset === "question-photo") return photo;
+    const builtin = builtInAssets.find((item) => item.id === asset);
+    assert.ok(builtin);
+    return readFile(`public${builtin.url}`);
+  };
+  const original = await generatePdf(
+    exam,
+    illustrated,
+    "COLEGIO CRAMER",
+    "original",
+    load(source),
+  );
+  const reduced = await generatePdf(
+    exam,
+    illustrated,
+    "COLEGIO CRAMER",
+    "original",
+    load(optimized),
+  );
+  assert.ok(original.length > 4_500_000);
+  assert.ok(reduced.length < 4_000_000);
+  assert.equal(
+    (await PDFDocument.load(reduced)).getPageCount(),
+    (await PDFDocument.load(original)).getPageCount(),
+  );
+
+  const webp = await sharp({
+    create: {
+      width: 2000,
+      height: 1000,
+      channels: 4,
+      background: { r: 20, g: 40, b: 70, alpha: 0.5 },
+    },
+  })
+    .webp()
+    .toBuffer();
+  const transparent = await sharp(await optimizePdfImage(webp)).metadata();
+  assert.equal(transparent.format, "png");
+  assert.equal(transparent.hasAlpha, true);
+  assert.equal(transparent.width, 1600);
+});
+
 test("PDF mixed exam, keys and separate sheets generate valid A4 documents", async () => {
   await mkdir("artifacts/pdf", { recursive: true });
   for (const mode of [

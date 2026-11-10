@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { builtInAssets } from "./editor-defaults";
+import { optimizePdfImage } from "./pdf-image";
 export function pdfAssetLoader(db: SupabaseClient) {
   const cache = new Map<string, Promise<Uint8Array>>();
   let bytes = 0;
@@ -11,8 +12,7 @@ export function pdfAssetLoader(db: SupabaseClient) {
       cache.set(
         asset,
         (async () => {
-          let buffer: Buffer,
-            mime = "";
+          let buffer: Buffer;
           const builtin = builtInAssets.find((a) => a.id === asset);
           if (builtin)
             buffer = await readFile(
@@ -23,20 +23,15 @@ export function pdfAssetLoader(db: SupabaseClient) {
               .from("questions")
               .download(asset);
             if (error) throw error;
-            buffer = Buffer.from(await data.arrayBuffer());
-            mime = data.type;
+            buffer = await optimizePdfImage(
+              Buffer.from(await data.arrayBuffer()),
+            );
           }
           bytes += buffer.length;
           if (bytes > 32 * 1024 * 1024)
             throw Error(
               "Las imágenes superan 32 MB. Divide la evaluación o reduce sus imágenes.",
             );
-          if (mime === "image/webp") {
-            const sharp = (await import("sharp")).default;
-            buffer = await sharp(buffer, { limitInputPixels: 32_000_000 })
-              .png()
-              .toBuffer();
-          }
           return new Uint8Array(buffer);
         })(),
       );
